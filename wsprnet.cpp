@@ -13,6 +13,7 @@
 #include <QNetworkReply>
 #include <QUrl>
 #include <QDebug>
+#include <QRegularExpression>
 
 #include "moc_wsprnet.cpp"
 
@@ -84,7 +85,7 @@ void WSPRNet::networkReply(QNetworkReply *reply)
     else {
       QString serverResponse = reply->readAll();
       if( m_uploadType == 2) {
-        if (!serverResponse.contains(QRegExp("spot\\(s\\) added"))) {
+        if (!serverResponse.contains(QRegularExpression("spot\\(s\\) added"))) {
           emit uploadStatus(QString {"Upload Failed: %1"}.arg (serverResponse));
           urlQueue.clear();
           uploadTimer->stop();
@@ -110,40 +111,45 @@ bool WSPRNet::decodeLine(QString const& line, QHash<QString,QString> &query)
     // 130223 2256 7    -21 -0.3  14.097090  DU1MGA PK04 37          0    40    0
     // Date   Time Sync dBm  DT   Freq       Msg
     // 1      2    3     4   5     6         -------7------          8     9    10
-    QRegExp rx("^(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+([+-]?\\d+)\\s+([+-]?\\d+\\.\\d+)\\s+(\\d+\\.\\d+)\\s+(.*)\\s+([+-]?\\d+)\\s+([+-]?\\d+)\\s+([+-]?\\d+)");
-    if (rx.indexIn(line) != -1) {
+    QRegularExpression rx("^(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+([+-]?\\d+)\\s+([+-]?\\d+\\.\\d+)\\s+(\\d+\\.\\d+)\\s+(.*)\\s+([+-]?\\d+)\\s+([+-]?\\d+)\\s+([+-]?\\d+)");
+    auto const rxMatch = rx.match(line);
+    if (rxMatch.hasMatch()) {
         int msgType = 0;
-        QString msg = rx.cap(7);
-        msg.remove(QRegExp("\\s+$"));
-        msg.remove(QRegExp("^\\s+"));
+        QString msg = rxMatch.captured(7);
+        msg.remove(QRegularExpression("\\s+$"));
+        msg.remove(QRegularExpression("^\\s+"));
         QString call, grid, dbm;
-        QRegExp msgRx;
+        QRegularExpression msgRx;
+        QRegularExpressionMatch msgMatch;
 
         // Check for Message Type 1
         msgRx.setPattern("^([A-Z0-9]{3,6})\\s+([A-Z]{2}\\d{2})\\s+(\\d+)");
-        if (msgRx.indexIn(msg) != -1) {
+        msgMatch = msgRx.match(msg);
+        if (msgMatch.hasMatch()) {
             msgType = 1;
-            call = msgRx.cap(1);
-            grid = msgRx.cap(2);
-            dbm = msgRx.cap(3);
+            call = msgMatch.captured(1);
+            grid = msgMatch.captured(2);
+            dbm = msgMatch.captured(3);
         }
 
         // Check for Message Type 2
         msgRx.setPattern("^([A-Z0-9/]+)\\s+(\\d+)");
-        if (msgRx.indexIn(msg) != -1) {
+        msgMatch = msgRx.match(msg);
+        if (msgMatch.hasMatch()) {
             msgType = 2;
-            call = msgRx.cap(1);
+            call = msgMatch.captured(1);
             grid = "";
-            dbm = msgRx.cap(2);
+            dbm = msgMatch.captured(2);
         }
 
         // Check for Message Type 3
         msgRx.setPattern("^<([A-Z0-9/]+)>\\s+([A-Z]{2}\\d{2}[A-Z]{2})\\s+(\\d+)");
-        if (msgRx.indexIn(msg) != -1) {
+        msgMatch = msgRx.match(msg);
+        if (msgMatch.hasMatch()) {
             msgType = 3;
-            call = msgRx.cap(1);
-            grid = msgRx.cap(2);
-            dbm = msgRx.cap(3);
+            call = msgMatch.captured(1);
+            grid = msgMatch.captured(2);
+            dbm = msgMatch.captured(3);
         }
 
         // Unknown message format
@@ -152,12 +158,12 @@ bool WSPRNet::decodeLine(QString const& line, QHash<QString,QString> &query)
         }
 
         query["function"] = "wspr";
-        query["date"] = rx.cap(1);
-        query["time"] = rx.cap(2);
-        query["sig"] = rx.cap(4);
-        query["dt"] = rx.cap(5);
-        query["drift"] = rx.cap(8);
-        query["tqrg"] = rx.cap(6);
+        query["date"] = rxMatch.captured(1);
+        query["time"] = rxMatch.captured(2);
+        query["sig"] = rxMatch.captured(4);
+        query["dt"] = rxMatch.captured(5);
+        query["drift"] = rxMatch.captured(8);
+        query["tqrg"] = rxMatch.captured(6);
         query["tcall"] = call;
         query["tgrid"] = grid;
         query["dbm"] = dbm;

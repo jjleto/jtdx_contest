@@ -53,7 +53,7 @@ using port_type = MessageServer::port_type;
 using Frequency = MessageServer::Frequency;
 
 //QRegExp message_alphabet {"[- A-Za-z0-9+./?]*"};
-QRegExp message_alphabet {"[- @A-Za-z0-9+./?#<>]*"};
+QRegularExpression message_alphabet {"[- @A-Za-z0-9+./?#<>]*"};
 
 //
 // Decodes Model - simple data model for all decodes
@@ -344,7 +344,7 @@ public:
 
     auto form_layout = new QFormLayout;
     form_layout->addRow (tr ("Free text:"), message_line_edit_);
-    message_line_edit_->setValidator (new QRegExpValidator {message_alphabet, this});
+    message_line_edit_->setValidator (new QRegularExpressionValidator {message_alphabet, this});
     connect (message_line_edit_, &QLineEdit::textEdited, [this] (QString const& text) {
         Q_EMIT do_free_text (id_, text, false);
       });

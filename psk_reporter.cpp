@@ -87,7 +87,7 @@ void PSK_Reporter::sendReport()
 
     // Header
     QString header_h = m_header_h;
-    header_h.replace("tttttttt", QString("%1").arg(QDateTime::currentDateTime().toTime_t(),8,16,QChar('0')));
+    header_h.replace("tttttttt", QString("%1").arg(QDateTime::currentDateTime().toSecsSinceEpoch(),8,16,QChar('0')));
     header_h.replace("ssssssss", QString("%1").arg(++m_sequenceNumber,8,16,QChar('0')));
     header_h.replace("iiiiiiii", m_randomId_h);
 

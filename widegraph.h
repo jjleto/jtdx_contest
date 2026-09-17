@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QScopedPointer>
 #include <QDir>
+#include <QByteArray>
 #include "WFPalette.hpp"
 #include "JTDXDateTime.h"
 #define MAX_SCREENSIZE 2048
@@ -31,6 +32,7 @@ public:
   int    Fmax();
   int    fSpan();
   void   saveSettings();
+  void   reRestoreGeometry();
   void   setRxRange(int fMin);
   void   setFsample(int n);
   void   setPeriod(double trperiod, int nsps);
@@ -76,7 +78,7 @@ private slots:
   void on_spec2dComboBox_currentIndexChanged(int n);
   void on_fSplitSpinBox_valueChanged(int n);
   void on_fStartSpinBox_valueChanged(int n);
-  void on_paletteComboBox_activated(const QString &palette);
+  void on_paletteComboBox_activated(int index);
   void on_timestampComboBox_currentIndexChanged(int n);
   void on_cbScale_toggled(bool b);
   void on_cbFlatten_toggled(bool b);
@@ -96,6 +98,7 @@ private:
   QScopedPointer<Ui::WideGraph> ui;
 
   QSettings * m_settings;
+  QByteArray m_geometry;
   QDir m_palettes_path;
   WFPalette m_userPalette;
 

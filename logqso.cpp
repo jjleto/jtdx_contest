@@ -157,7 +157,7 @@ void LogQSO::accept()
   //Log this QSO to ADIF file "wsjtx_log.adi"
   QString filename = "wsjtx_log.adi";  // TODO allow user to set
   ADIF adifile;
-  auto adifilePath = QDir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)}.absoluteFilePath ("wsjtx_log.adi");
+  auto adifilePath = QDir {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)}.absoluteFilePath ("wsjtx_log.adi");
   adifile.init(adifilePath);
   if (!adifile.addQSOToFile(hisCall,hisGrid,mode,rptSent,rptRcvd,m_dateTimeOn,m_dateTimeOff,band,comments,name,strDialFreq,m_myCall,m_myGrid,m_txPower,m_send_to_eqsl))
   {
@@ -176,7 +176,7 @@ void LogQSO::accept()
   if (!contestFile.isEmpty ())
     {
       ADIF contestAdi;
-      auto contestPath = QDir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)}.absoluteFilePath (contestFile);
+      auto contestPath = QDir {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)}.absoluteFilePath (contestFile);
       contestAdi.init (contestPath);
       if (!contestAdi.addQSOToFile (hisCall,hisGrid,mode,rptSent,rptRcvd,m_dateTimeOn,m_dateTimeOff,band,comments,name,strDialFreq,m_myCall,m_myGrid,m_txPower,m_send_to_eqsl))
         {
@@ -185,7 +185,7 @@ void LogQSO::accept()
     }
 
 //Log this QSO to file "wsjtx.log"
-  static QFile f {QDir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)}.absoluteFilePath ("wsjtx.log")};
+  static QFile f {QDir {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)}.absoluteFilePath ("wsjtx.log")};
   if(!f.open(QIODevice::Text | QIODevice::Append)) {
     JTDXMessageBox::information_message(0,"","Cannot open file \"" + f.fileName () + "\" for append:" + f.errorString ());
   } else {
@@ -252,7 +252,7 @@ void LogQSO::accept()
   myadif2 = myadif.toUtf8();
   if (m_enable_tcp_connection){
     QTcpSocket socket;
-    static QFile f2 {QDir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)}.absoluteFilePath ("tcptrace.txt")};
+    static QFile f2 {QDir {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)}.absoluteFilePath ("tcptrace.txt")};
     bool fopen = false;
     if(m_debug) { 
       if(f2.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Append)) fopen = true;

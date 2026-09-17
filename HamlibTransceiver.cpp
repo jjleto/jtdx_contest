@@ -226,7 +226,7 @@ HamlibTransceiver::HamlibTransceiver (TransceiverFactory::PTTMethod ptt_type, QS
   , m_jtdxtime {nullptr}
   , get_vfo_works_ {true}
   , set_vfo_works_ {true}
-  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::DataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
+  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
 {
   if (!rig_)
     {
@@ -311,7 +311,7 @@ HamlibTransceiver::HamlibTransceiver (unsigned model_number, TransceiverFactory:
   , m_jtdxtime {nullptr}
   , get_vfo_works_ {true}
   , set_vfo_works_ {true}
-  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::DataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
+  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
 {
   if (!rig_)
     {

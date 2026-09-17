@@ -57,7 +57,8 @@ WideGraph::WideGraph(QSettings * settings, JTDXDateTime * jtdxtime, QWidget *par
 
   //Restore user's settings
   m_settings->beginGroup("WideGraph");
-  restoreGeometry (m_settings->value ("geometry", saveGeometry ()).toByteArray ());
+  m_geometry = m_settings->value ("geometry", saveGeometry ()).toByteArray ();
+  restoreGeometry (m_geometry);
   /* CE3TSK: a geometry saved when the window was dragged small, or with a smaller font,
      can be below what the layout needs and Qt then crushes the children. sizeHint() is
      what the layout wants and it tracks the application font; a larger saved size is
@@ -181,6 +182,21 @@ void WideGraph::closeEvent (QCloseEvent * e)
 {
   saveSettings ();
   QDialog::closeEvent (e);
+}
+
+/* CE3TSK/qt6-port: the plain restoreGeometry() call in the constructor, up above, runs before
+   this window (or the application in general) has ever been shown - on macOS something in the
+   startup sequence (the window server placing/clamping a not-yet-visible window, most likely)
+   quietly overrides that early restore a moment later, so a resize made in a previous session
+   was lost even though it had been saved correctly and even though restoreGeometry() itself ran
+   without error. MainWindow hits the exact same thing for its own geometry and already works
+   around it with a short delayed re-restore a couple of guiUpdate() ticks after startup (see
+   m_geometry_restored there); this gives WideGraph the same second chance, called from that
+   same delayed spot so no extra timer is needed here. */
+void WideGraph::reRestoreGeometry ()
+{
+  restoreGeometry (m_geometry);
+  resize (size ().expandedTo (sizeHint ()));
 }
 
 void WideGraph::saveSettings()                                           //saveSettings
@@ -475,9 +491,11 @@ void WideGraph::readPalette ()                                   //readPalette
     }
 }
 
-void WideGraph::on_paletteComboBox_activated (QString const& palette)    //palette selector
+void WideGraph::on_paletteComboBox_activated (int index)    //palette selector
 {
-  m_waterfallPalette = palette;
+  // Qt6: QComboBox::activated (QString) was removed, only the int overload
+  // remains - recover the item text ourselves.
+  m_waterfallPalette = ui->paletteComboBox->itemText (index);
   readPalette();
 }
 

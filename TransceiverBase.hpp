@@ -67,7 +67,7 @@ protected:
     : Transceiver {parent}
     , jtdxtime_ {nullptr}
     , last_sequence_number_ {0}
-    , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::DataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
+    , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
   {}
 
 public:

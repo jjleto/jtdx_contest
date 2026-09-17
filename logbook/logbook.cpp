@@ -22,7 +22,7 @@ void LogBook::init(const QString mycall,const QString mygrid,const QString mydat
                    QString const& logFileName, CountryDat* sharedCountries)
 {
   _shared = sharedCountries;   /* CE3TSK */
-  QDir dataPath {QStandardPaths::writableLocation (QStandardPaths::DataLocation)};
+  QDir dataPath {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)};
   QString countryDataFilename,lotwDataFilename;
   if (dataPath.exists (countryFileName))
     {

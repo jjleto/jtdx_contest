@@ -44,13 +44,32 @@ extern "C"  {
 #	endif
 #endif
 
-  /* typedef for consistent gfortran ABI for charlen type hidden arguments */
-#if __GNUC__ > 7
-#ifdef __cplusplus
-#include <cstddef>
-#else
+  /* typedef for consistent gfortran ABI for charlen type hidden arguments.
+     CE3TSK/qt6-port: this used to be "#if __GNUC__ > 7", which silently
+     checks the C/C++ COMPILER's identity, not the FORTRAN compiler's - fine
+     on Linux where g++ and gfortran are the same unified GCC toolchain, but
+     wrong on macOS, where this header is force-included into C++ files
+     compiled by Apple Clang (which reports a fixed, harmless __GNUC__==4 for
+     source compatibility) while the Fortran sources are actually compiled by
+     a real, modern Homebrew gfortran (>= 8). That mismatch always picked the
+     32-bit "int" branch on macOS even though gfortran >= 8's ABI expects a
+     64-bit "size_t" for these hidden length arguments, corrupting them on
+     every call and crashing (SIGBUS) inside Fortran routines that use
+     character(len=*) dummy arguments, e.g. azdist_(). Now driven by CMake's
+     own detection of the actual CMAKE_Fortran_COMPILER_VERSION instead. */
+#cmakedefine01 WSJT_FORTRAN_CHARLEN_IS_SIZE_T
+#if WSJT_FORTRAN_CHARLEN_IS_SIZE_T
+  /* CE3TSK/qt6-port: use the plain C header here, not <cstddef> - this
+     whole file is wrapped in extern "C" (see top), and Apple's libc++
+     <cstddef> pulls in <type_traits> machinery (is_integral, etc.) whose
+     templates are not guarded for being declared under an enclosing
+     extern "C" linkage, which fails to compile ("templates must have C++
+     linkage"). This branch was never actually exercised on macOS before -
+     the old __GNUC__-based check above always fell through to the plain
+     "int" branch there - so this only surfaced once that was fixed.
+     <stddef.h> is a pure C header and declares plain ::size_t safely in
+     both C and C++, extern "C" or not. */
 #include <stddef.h>
-#endif
   typedef size_t fortran_charlen_t;
 #else
   typedef int fortran_charlen_t;

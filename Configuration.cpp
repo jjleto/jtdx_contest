@@ -149,8 +149,8 @@ extern "C" {
 #include <QMetaType>
 #include <QList>
 #include <QSettings>
-#include <QAudioDeviceInfo>
-#include <QAudioInput>
+#include <QAudioDevice>
+#include <QMediaDevices>
 #include <QDialog>
 #include <QAction>
 #include <QFileDialog>
@@ -162,7 +162,7 @@ extern "C" {
 #include <QStringList>
 #include <QStringListModel>
 #include <QLineEdit>
-#include <QRegExpValidator>
+#include <QRegularExpressionValidator>
 #include <QIntValidator>
 #include <QThread>
 #include <QTimer>
@@ -205,7 +205,7 @@ namespace
   int const combo_box_item_enabled (32 | 1);
   int const combo_box_item_disabled (0);
 
-  QRegExp message_alphabet {"[- @A-Za-z0-9+./?#<>&^]*"};
+  QRegularExpression message_alphabet {"[- @A-Za-z0-9+./?#<>&^]*"};
 
   // Magic numbers for file validation
   constexpr quint32 qrg_magic {0xadbccbdb};
@@ -399,7 +399,7 @@ public:
   {
     auto editor = new QLineEdit {parent};
     editor->setFrame (false);
-    editor->setValidator (new QRegExpValidator {message_alphabet, editor});
+    editor->setValidator (new QRegularExpressionValidator {message_alphabet, editor});
     return editor;
   }
 };
@@ -442,14 +442,14 @@ public:
   Q_SLOT void done (int) override;
 
 private:
-  typedef QList<QAudioDeviceInfo> AudioDevices;
+  typedef QList<QAudioDevice> AudioDevices;
 
   void read_settings ();
   bool colors_differ_from_recommended () const;      // CE3TSK
   void apply_recommended_colors ();            // CE3TSK
   void write_settings ();
 
-  bool load_audio_devices (QAudio::Mode, QComboBox *, QAudioDeviceInfo *);
+  bool load_audio_devices (QAudioDevice::Mode, QComboBox *, QAudioDevice *);
   void update_audio_channels (QComboBox const *, int, QComboBox *, bool);
 
   void set_application_font (QFont const&);
@@ -1026,10 +1026,10 @@ private:
   bool pwrBandTxMemory_;
   bool pwrBandTuneMemory_;
 
-  QAudioDeviceInfo audio_input_device_;
+  QAudioDevice audio_input_device_;
   bool default_audio_input_device_selected_;
   AudioDevice::Channel audio_input_channel_;
-  QAudioDeviceInfo audio_output_device_;
+  QAudioDevice audio_output_device_;
   bool default_audio_output_device_selected_;
   AudioDevice::Channel audio_output_channel_;
   
@@ -1058,9 +1058,9 @@ QDir Configuration::temp_dir () const {return m_->temp_dir_;}
 int Configuration::exec () {return m_->exec ();}
 bool Configuration::is_active () const {return m_->isVisible ();}
 
-QAudioDeviceInfo const& Configuration::audio_input_device () const {return m_->audio_input_device_;}
+QAudioDevice const& Configuration::audio_input_device () const {return m_->audio_input_device_;}
 AudioDevice::Channel Configuration::audio_input_channel () const {return m_->audio_input_channel_;}
-QAudioDeviceInfo const& Configuration::audio_output_device () const {return m_->audio_output_device_;}
+QAudioDevice const& Configuration::audio_output_device () const {return m_->audio_output_device_;}
 AudioDevice::Channel Configuration::audio_output_channel () const {return m_->audio_output_channel_;}
 bool Configuration::restart_audio_input () const {return m_->restart_sound_input_device_;}
 bool Configuration::restart_audio_output () const {return m_->restart_sound_output_device_;}
@@ -1732,7 +1732,7 @@ Configuration::impl::impl (Configuration * self, QSettings * settings, QWidget *
 
   {
     // Find a suitable data file location
-    QDir data_dir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)};
+    QDir data_dir {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)};
     if (!data_dir.mkpath ("."))
       {
         JTDXMessageBox::critical_message (this, "JTDX", tr ("Create data directory error: ") + data_dir.absolutePath ());
@@ -1784,13 +1784,13 @@ Configuration::impl::impl (Configuration * self, QSettings * settings, QWidget *
   //
   // validation
   //
-  ui_->callsign_line_edit->setValidator (new QRegExpValidator {QRegExp {"[A-Za-z0-9/-]+"}, this});
-  ui_->grid_line_edit->setValidator (new QRegExpValidator {QRegExp {"[A-Ra-r]{1,1}|[A-Ra-r]{2,2}|[A-Ra-r]{2,2}[0-9]{1,1}|[A-Ra-r]{2,2}[0-9]{2,2}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{1,1}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}[0-9]{1,1}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}[0-9]{2,2}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}[0-9]{2,2}[A-Xa-x]{1,1}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}"}, this});
-  ui_->logTime_line_edit->setValidator (new QRegExpValidator {QRegExp {"[0-9]+"}, this});
-  ui_->content_line_edit->setValidator (new QRegExpValidator {QRegExp {"[A-Za-z0-9,]+"}, this});
-  ui_->countries_line_edit->setValidator (new QRegExpValidator {QRegExp {"[A-Za-z0-9,/*]+"}, this});
-  ui_->callsigns_line_edit->setValidator (new QRegExpValidator {QRegExp {"[A-Za-z0-9,]+"}, this});
-  ui_->add_macro_line_edit->setValidator (new QRegExpValidator {message_alphabet, this});
+  ui_->callsign_line_edit->setValidator (new QRegularExpressionValidator {QRegularExpression {"[A-Za-z0-9/-]+"}, this});
+  ui_->grid_line_edit->setValidator (new QRegularExpressionValidator {QRegularExpression {"[A-Ra-r]{1,1}|[A-Ra-r]{2,2}|[A-Ra-r]{2,2}[0-9]{1,1}|[A-Ra-r]{2,2}[0-9]{2,2}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{1,1}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}[0-9]{1,1}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}[0-9]{2,2}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}[0-9]{2,2}[A-Xa-x]{1,1}|[A-Ra-r]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}[0-9]{2,2}[A-Xa-x]{2,2}"}, this});
+  ui_->logTime_line_edit->setValidator (new QRegularExpressionValidator {QRegularExpression {"[0-9]+"}, this});
+  ui_->content_line_edit->setValidator (new QRegularExpressionValidator {QRegularExpression {"[A-Za-z0-9,]+"}, this});
+  ui_->countries_line_edit->setValidator (new QRegularExpressionValidator {QRegularExpression {"[A-Za-z0-9,/*]+"}, this});
+  ui_->callsigns_line_edit->setValidator (new QRegularExpressionValidator {QRegularExpression {"[A-Za-z0-9,]+"}, this});
+  ui_->add_macro_line_edit->setValidator (new QRegularExpressionValidator {message_alphabet, this});
 
   ui_->udp_server_port_spin_box->setMinimum (1);
   ui_->udp_server_port_spin_box->setMaximum (std::numeric_limits<port_type>::max ());
@@ -2050,8 +2050,8 @@ Configuration::impl::impl (Configuration * self, QSettings * settings, QWidget *
   //
   // load combo boxes with audio setup choices
   //
-  default_audio_input_device_selected_ = load_audio_devices (QAudio::AudioInput, ui_->sound_input_combo_box, &audio_input_device_);
-  default_audio_output_device_selected_ = load_audio_devices (QAudio::AudioOutput, ui_->sound_output_combo_box, &audio_output_device_);
+  default_audio_input_device_selected_ = load_audio_devices (QAudioDevice::Input, ui_->sound_input_combo_box, &audio_input_device_);
+  default_audio_output_device_selected_ = load_audio_devices (QAudioDevice::Output, ui_->sound_output_combo_box, &audio_output_device_);
 
   update_audio_channels (ui_->sound_input_combo_box, ui_->sound_input_combo_box->currentIndex (), ui_->sound_input_channel_combo_box, false);
   update_audio_channels (ui_->sound_output_combo_box, ui_->sound_output_combo_box->currentIndex (), ui_->sound_output_channel_combo_box, true);
@@ -2752,8 +2752,8 @@ void Configuration::impl::read_settings ()
     auto saved_name = settings_->value ("SoundInName").toString ();
 
     // deal with special Windows default audio devices
-    auto default_device = QAudioDeviceInfo::defaultInputDevice ();
-    if (saved_name == default_device.deviceName ())
+    auto default_device = QMediaDevices::defaultAudioInput ();
+    if (saved_name == default_device.description ())
       {
         audio_input_device_ = default_device;
         default_audio_input_device_selected_ = true;
@@ -2761,9 +2761,9 @@ void Configuration::impl::read_settings ()
     else
       {
         default_audio_input_device_selected_ = false;
-        Q_FOREACH (auto const& p, QAudioDeviceInfo::availableDevices (QAudio::AudioInput)) // available audio input devices
+        Q_FOREACH (auto const& p, QMediaDevices::audioInputs ()) // available audio input devices
           {
-            if (p.deviceName () == saved_name)
+            if (p.description () == saved_name)
               {
                 audio_input_device_ = p;
               }
@@ -2778,8 +2778,8 @@ void Configuration::impl::read_settings ()
     auto saved_name = settings_->value("SoundOutName").toString();
 
     // deal with special Windows default audio devices
-    auto default_device = QAudioDeviceInfo::defaultOutputDevice ();
-    if (saved_name == default_device.deviceName ())
+    auto default_device = QMediaDevices::defaultAudioOutput ();
+    if (saved_name == default_device.description ())
       {
         audio_output_device_ = default_device;
         default_audio_output_device_selected_ = true;
@@ -2787,9 +2787,9 @@ void Configuration::impl::read_settings ()
     else
       {
         default_audio_output_device_selected_ = false;
-        Q_FOREACH (auto const& p, QAudioDeviceInfo::availableDevices (QAudio::AudioOutput)) // available audio output devices
+        Q_FOREACH (auto const& p, QMediaDevices::audioOutputs ()) // available audio output devices
           {
-            if (p.deviceName () == saved_name)
+            if (p.description () == saved_name)
               {
                 audio_output_device_ = p;
               }
@@ -3214,20 +3214,20 @@ void Configuration::impl::write_settings ()
 
   if (default_audio_input_device_selected_)
     {
-      settings_->setValue ("SoundInName", QAudioDeviceInfo::defaultInputDevice ().deviceName ());
+      settings_->setValue ("SoundInName", QMediaDevices::defaultAudioInput ().description ());
     }
   else
     {
-      settings_->setValue ("SoundInName", audio_input_device_.deviceName ());
+      settings_->setValue ("SoundInName", audio_input_device_.description ());
     }
 
   if (default_audio_output_device_selected_)
     {
-      settings_->setValue ("SoundOutName", QAudioDeviceInfo::defaultOutputDevice ().deviceName ());
+      settings_->setValue ("SoundOutName", QMediaDevices::defaultAudioOutput ().description ());
     }
   else
     {
-      settings_->setValue ("SoundOutName", audio_output_device_.deviceName ());
+      settings_->setValue ("SoundOutName", audio_output_device_.description ());
     }
 
   settings_->setValue ("AudioInputChannel", AudioDevice::toString (audio_input_channel_));
@@ -3561,14 +3561,14 @@ void Configuration::impl::set_rig_invariants ()
 bool Configuration::impl::validate ()
 {
   if (ui_->sound_input_combo_box->currentIndex () < 0
-      && !QAudioDeviceInfo::availableDevices (QAudio::AudioInput).empty ())
+      && !QMediaDevices::audioInputs ().empty ())
     {
       message_box_critical (tr ("Invalid audio input device"));
       return false;
     }
 
   if (ui_->sound_output_combo_box->currentIndex () < 0
-      && !QAudioDeviceInfo::availableDevices (QAudio::AudioOutput).empty ())
+      && !QMediaDevices::audioOutputs ().empty ())
     {
       message_box_critical (tr ("Invalid audio output device"));
       return false;
@@ -3791,19 +3791,19 @@ void Configuration::impl::accept ()
   // and save user parameters.
   {
     auto const& device_name = ui_->sound_input_combo_box->currentText ();
-    if (device_name != audio_input_device_.deviceName ())
+    if (device_name != audio_input_device_.description ())
       {
-        auto const& default_device = QAudioDeviceInfo::defaultInputDevice ();
-        if (device_name == default_device.deviceName ())
+        auto const& default_device = QMediaDevices::defaultAudioInput ();
+        if (device_name == default_device.description ())
           {
             audio_input_device_ = default_device;
           }
         else
           {
             bool found {false};
-            Q_FOREACH (auto const& d, QAudioDeviceInfo::availableDevices (QAudio::AudioInput))
+            Q_FOREACH (auto const& d, QMediaDevices::audioInputs ())
               {
-                if (device_name == d.deviceName ())
+                if (device_name == d.description ())
                   {
                     audio_input_device_ = d;
                     found = true;
@@ -3820,19 +3820,19 @@ void Configuration::impl::accept ()
 
   {
     auto const& device_name = ui_->sound_output_combo_box->currentText ();
-    if (device_name != audio_output_device_.deviceName ())
+    if (device_name != audio_output_device_.description ())
       {
-        auto const& default_device = QAudioDeviceInfo::defaultOutputDevice ();
-        if (device_name == default_device.deviceName ())
+        auto const& default_device = QMediaDevices::defaultAudioOutput ();
+        if (device_name == default_device.description ())
           {
             audio_output_device_ = default_device;
           }
         else
           {
             bool found {false};
-            Q_FOREACH (auto const& d, QAudioDeviceInfo::availableDevices (QAudio::AudioOutput))
+            Q_FOREACH (auto const& d, QMediaDevices::audioOutputs ())
               {
-                if (device_name == d.deviceName ())
+                if (device_name == d.description ())
                   {
                     audio_output_device_ = d;
                     found = true;
@@ -5908,8 +5908,8 @@ void Configuration::impl::on_refresh_push_button_clicked ()
   //
   // load combo boxes with audio setup choices
   //
-  default_audio_input_device_selected_ = load_audio_devices (QAudio::AudioInput, ui_->sound_input_combo_box, &audio_input_device_);
-  default_audio_output_device_selected_ = load_audio_devices (QAudio::AudioOutput, ui_->sound_output_combo_box, &audio_output_device_);
+  default_audio_input_device_selected_ = load_audio_devices (QAudioDevice::Input, ui_->sound_input_combo_box, &audio_input_device_);
+  default_audio_output_device_selected_ = load_audio_devices (QAudioDevice::Output, ui_->sound_output_combo_box, &audio_output_device_);
 
   update_audio_channels (ui_->sound_input_combo_box, ui_->sound_input_combo_box->currentIndex (), ui_->sound_input_channel_combo_box, false);
   update_audio_channels (ui_->sound_output_combo_box, ui_->sound_output_combo_box->currentIndex (), ui_->sound_output_channel_combo_box, true);
@@ -5929,12 +5929,12 @@ void Configuration::impl::on_tci_audio_check_box_clicked(bool checked)
 
 void Configuration::impl::on_sound_input_combo_box_currentTextChanged (QString const& text)
 {
-  default_audio_input_device_selected_ = QAudioDeviceInfo::defaultInputDevice ().deviceName () == text;
+  default_audio_input_device_selected_ = QMediaDevices::defaultAudioInput ().description () == text;
 }
 
 void Configuration::impl::on_sound_output_combo_box_currentTextChanged (QString const& text)
 {
-  default_audio_output_device_selected_ = QAudioDeviceInfo::defaultOutputDevice ().deviceName () == text;
+  default_audio_output_device_selected_ = QMediaDevices::defaultAudioOutput ().description () == text;
 }
 
 void Configuration::impl::on_hhComboBox_1_currentIndexChanged(int index)
@@ -7200,7 +7200,7 @@ void Configuration::impl::close_rig ()
 // load the available audio devices into the selection combo box and
 // select the default device if the current device isn't set or isn't
 // available
-bool Configuration::impl::load_audio_devices (QAudio::Mode mode, QComboBox * combo_box, QAudioDeviceInfo * device)
+bool Configuration::impl::load_audio_devices (QAudioDevice::Mode mode, QComboBox * combo_box, QAudioDevice * device)
 {
   using std::copy;
   using std::back_inserter;
@@ -7223,19 +7223,19 @@ bool Configuration::impl::load_audio_devices (QAudio::Mode mode, QComboBox * com
   }
   int extra_items {0};
 
-  auto const& default_device = (mode == QAudio::AudioInput ? QAudioDeviceInfo::defaultInputDevice () : QAudioDeviceInfo::defaultOutputDevice ());
+  auto const& default_device = (mode == QAudioDevice::Input ? QMediaDevices::defaultAudioInput () : QMediaDevices::defaultAudioOutput ());
 
   // deal with special default audio devices on Windows
-  if ("Default Input Device" == default_device.deviceName ()
-      || "Default Output Device" == default_device.deviceName ())
+  if ("Default Input Device" == default_device.description ()
+      || "Default Output Device" == default_device.description ())
     {
       default_index = 0;
 
       QList<QVariant> channel_counts;
-      auto scc = default_device.supportedChannelCounts ();
+      QList<int> scc {1, 2};
       copy (scc.cbegin (), scc.cend (), back_inserter (channel_counts));
 
-      combo_box->addItem (default_device.deviceName (), channel_counts);
+      combo_box->addItem (default_device.description (), channel_counts);
       ++extra_items;
       if (default_device == *device)
         {
@@ -7244,14 +7244,14 @@ bool Configuration::impl::load_audio_devices (QAudio::Mode mode, QComboBox * com
         }
     }
 
-  Q_FOREACH (auto const& p, QAudioDeviceInfo::availableDevices (mode))
+  Q_FOREACH (auto const& p, (QAudioDevice::Input == mode ? QMediaDevices::audioInputs () : QMediaDevices::audioOutputs ()))
     {
       // convert supported channel counts into something we can store in the item model
       QList<QVariant> channel_counts;
-      auto scc = p.supportedChannelCounts ();
+      QList<int> scc {1, 2};
       copy (scc.cbegin (), scc.cend (), back_inserter (channel_counts));
 
-      combo_box->addItem (p.deviceName (), channel_counts);
+      combo_box->addItem (p.description (), channel_counts);
       if (p == *device)
         {
           current_index = combo_box->count () - 1;

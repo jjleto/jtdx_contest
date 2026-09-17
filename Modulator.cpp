@@ -39,7 +39,7 @@ Modulator::Modulator (unsigned frameRate, double periodLengthInSeconds, JTDXDate
   , m_j0 {-1}
   , m_toneFrequency0 {1500.0}
   , m_jtdxtime {jtdxtime}
-  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::DataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
+  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
 {
 }
 

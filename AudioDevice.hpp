@@ -2,6 +2,7 @@
 #define AUDIODEVICE_HPP__
 
 #include <QIODevice>
+#include <limits>
 
 class QDataStream;
 
@@ -27,6 +28,24 @@ public:
   bool initialize (OpenMode mode, Channel channel);
 
   bool isSequential () const override {return true;}
+
+  // CE3TSK/qt6-port: Qt6's QAudioSink (pull mode, unlike Qt5's
+  // QAudioOutput) consults QIODevice::bytesAvailable () on the source
+  // before calling readData () on it. The QIODevice base implementation
+  // returns 0 for a sequential device with no internal buffer, which
+  // Qt6's CoreAudio backend appears to treat as "nothing to read right
+  // now" - it never calls readData () at all, even though the underlying
+  // AudioUnit/AUHAL stream still reports itself as genuinely active.
+  // That produced exactly the observed symptom: a healthy, "Active"
+  // CoreAudio output stream with total silence, because our own
+  // synthesized samples were never being pulled in the first place.
+  // AudioDevice (both the Modulator TX generator and any RX consumer)
+  // is an effectively-infinite synthetic stream, not a finite buffered
+  // one, so report a large constant instead of the default 0.
+  qint64 bytesAvailable () const override
+  {
+    return std::numeric_limits<qint64>::max () / 2;
+  }
 
   size_t bytesPerFrame () const {return sizeof (qint16) * (Mono == m_channel ? 1 : 2);}
 

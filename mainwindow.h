@@ -14,7 +14,7 @@
 #include <QTimer>
 #include <QList>
 #include <QStringList>
-#include <QAudioDeviceInfo>
+#include <QAudioDevice>
 #include <QScopedPointer>
 #include <QDir>
 #include <QProgressDialog>
@@ -462,7 +462,7 @@ private slots:
   void on_AutoTxButton_clicked(bool);
   void on_AutoSeqButton_clicked(bool);
   void networkError (QString const&);
-  void statusUpdate () const;
+  void statusUpdate ();
   void add_child_to_event_filter (QObject *);
   void remove_child_from_event_filter (QObject *);
   void txwatchdog (bool triggered);
@@ -472,7 +472,7 @@ private slots:
   void on_cbShowSpot_toggled(bool b);
   void dynamicButtonsInit();
   void on_actionWSPR_2_triggered();
-  void on_TxPowerComboBox_currentIndexChanged(const QString &arg1);
+  void on_TxPowerComboBox_currentIndexChanged(int index);
   void on_sbTxPercent_valueChanged(int n);
   void on_cbUploadWSPR_Spots_toggled(bool b);
   void WSPR_config(bool b);
@@ -491,10 +491,10 @@ private slots:
   void on_S_meter_button_clicked(bool checked);
 
 private:
-  Q_SIGNAL void initializeAudioOutputStream (QAudioDeviceInfo,
+  Q_SIGNAL void initializeAudioOutputStream (QAudioDevice,
       unsigned channels, unsigned msBuffered) const;
   Q_SIGNAL void stopAudioOutputStream () const;
-  Q_SIGNAL void startAudioInputStream (QAudioDeviceInfo const&,
+  Q_SIGNAL void startAudioInputStream (QAudioDevice const&,
       int framesPerBuffer, AudioDevice * sink,
       unsigned downSampleFactor, AudioDevice::Channel) const;
   Q_SIGNAL void suspendAudioInputStream () const;
@@ -932,6 +932,7 @@ private:
   double m_toneSpacing;
   qint32 m_geometry_restored;
   qint32 m_firstDecode;
+  bool m_statusUpdatePending;
   QProgressDialog m_optimizingProgress;
   QTimer m_heartbeat;
   MessageClient * m_messageClient;

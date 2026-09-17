@@ -1,5 +1,8 @@
 #include "WSPRBandHopping.hpp"
 
+#include <algorithm>
+#include <random>
+
 #include <QPointer>
 #include <QSettings>
 #include <QBitArray>
@@ -391,10 +394,16 @@ auto WSPRBandHopping::next_hop (bool tx_enabled) -> Hop
 #endif
             {
               // build new random permutations
+              // std::random_shuffle () was removed in C++17 (Apple's libc++
+              // drops it outright under -std=c++17, while GNU libstdc++ only
+              // deprecates it - which is why this built fine on Linux but not
+              // on macOS); replaced with std::shuffle () and an explicit
+              // random engine, matching the standard C++17 replacement.
+              static std::mt19937 random_engine {std::random_device {} ()};
               m_->rx_permutation_ = target_rx_bands.values ();
-              std::random_shuffle (std::begin (m_->rx_permutation_), std::end (m_->rx_permutation_));
+              std::shuffle (std::begin (m_->rx_permutation_), std::end (m_->rx_permutation_), random_engine);
               m_->tx_permutation_ = target_tx_bands.values ();
-              std::random_shuffle (std::begin (m_->tx_permutation_), std::end (m_->tx_permutation_));
+              std::shuffle (std::begin (m_->tx_permutation_), std::end (m_->tx_permutation_), random_engine);
               // qDebug () << "New random Rx permutation:" << m_->rx_permutation_
               //           << "random Tx permutation:" << m_->tx_permutation_;
             }

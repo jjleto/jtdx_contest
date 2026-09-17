@@ -1,8 +1,8 @@
 #include "soundin.h"
 
-#include <QAudioDeviceInfo>
+#include <QAudioDevice>
 #include <QAudioFormat>
-#include <QAudioInput>
+#include <QAudioSource>
 #include <QSysInfo>
 #include <QDebug>
 
@@ -41,7 +41,7 @@ bool SoundInput::audioError () const
   return result;
 }
 
-void SoundInput::start(QAudioDeviceInfo const& device, int framesPerBuffer, AudioDevice * sink, unsigned downSampleFactor, AudioDevice::Channel channel)
+void SoundInput::start(QAudioDevice const& device, int framesPerBuffer, AudioDevice * sink, unsigned downSampleFactor, AudioDevice::Channel channel)
 {
   Q_ASSERT (sink);
 
@@ -52,11 +52,8 @@ void SoundInput::start(QAudioDeviceInfo const& device, int framesPerBuffer, Audi
   QAudioFormat format (device.preferredFormat());
 //  qDebug () << "Preferred audio input format:" << format;
   format.setChannelCount (AudioDevice::Mono == channel ? 1 : 2);
-  format.setCodec ("audio/pcm");
   format.setSampleRate (12000 * downSampleFactor);
-  format.setSampleType (QAudioFormat::SignedInt);
-  format.setSampleSize (16);
-  format.setByteOrder (QAudioFormat::Endian (QSysInfo::ByteOrder));
+  format.setSampleFormat (QAudioFormat::Int16);
   if (!format.isValid ())
     {
       Q_EMIT error (tr ("Requested input audio format is not valid."));
@@ -71,13 +68,13 @@ void SoundInput::start(QAudioDeviceInfo const& device, int framesPerBuffer, Audi
     }
 //  qDebug () << "Selected audio input format:" << format;
 
-  m_stream.reset (new QAudioInput {device, format});
+  m_stream.reset (new QAudioSource {device, format});
   if (audioError ())
     {
       return;
     }
 
-  connect (m_stream.data(), &QAudioInput::stateChanged, this, &SoundInput::handleStateChanged);
+  connect (m_stream.data(), &QAudioSource::stateChanged, this, &SoundInput::handleStateChanged);
 
   if (framesPerBuffer > 0) { m_stream->setBufferSize (m_stream->format ().bytesForFrames (framesPerBuffer)); }
   if (sink->initialize (QIODevice::WriteOnly, channel))
@@ -133,7 +130,7 @@ void SoundInput::handleStateChanged (QAudio::State newState) const
       Q_EMIT status (tr ("Suspended"));
       break;
 
-#if QT_VERSION >= QT_VERSION_CHECK (5, 10, 0)
+#if QT_VERSION >= QT_VERSION_CHECK (5, 10, 0) && QT_VERSION < QT_VERSION_CHECK (6, 0, 0)
     case QAudio::InterruptedState:
       Q_EMIT status (tr ("Interrupted"));
       break;

@@ -24,7 +24,7 @@ PollingTransceiver::PollingTransceiver (int poll_interval, QObject * parent)
   , ft4_mode_ {false}
   , fast_mode_ {interval_ == 500}
   , retries_ {0}
-  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::DataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
+  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
   , m_jtdxtime {nullptr}
 {
 #if JTDX_DEBUG_TO_FILE

@@ -4,6 +4,7 @@
 
 #include <QString>
 #include <QByteArray>
+#include <QIODevice>
 
 #include "pimpl_impl.hpp"
 

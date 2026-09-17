@@ -12,6 +12,7 @@
 #include <QHostAddress>
 
 #include "NetworkMessage.hpp"
+#include "revision_utils.hpp"
 
 #include "pimpl_impl.hpp"
 
@@ -253,8 +254,20 @@ void MessageClient::impl::heartbeat ()
     {
       QByteArray message;
       NetworkMessage::Builder hb {&message, NetworkMessage::Heartbeat, id_, schema_};
+      /* CE3TSK/qt6-port: real WSJT-X's Heartbeat carries a fourth field, Revision, after
+         Id/MaxSchemaNumber/Version - this fork stopped one field short, same class of bug as
+         the Status message (see the long comment in MessageClient::status_update()). A schema-
+         compliant client reading past the end of a too-short Heartbeat datagram is left with
+         whatever garbage follows in its receive buffer for that read, which can desynchronize
+         its per-client state until the next Heartbeat (every 15s here - NetworkMessage::pulse -
+         which is why the symptom tracks the FT8 T/R period so closely without actually being
+         caused by the decode cycle itself). revision() (revision_utils.hpp) is the same string
+         already shown in the window title/program_title(), so this costs nothing extra to
+         maintain and can genuinely be empty (stock WSJT-X sends an empty Revision on non-SVN
+         builds too). */
       hb << NetworkMessage::Builder::schema_number // maximum schema number accepted
-         << version_.toUtf8 ();
+         << version_.toUtf8 ()
+         << revision ().toUtf8 ();
       if (OK == check_status (hb))
         {
           writeDatagram (message, server_, server_port_);
@@ -411,16 +424,35 @@ void MessageClient::status_update (Frequency f, QString const& mode, QString con
                                    , qint32 rx_df, qint32 tx_df, QString const& de_call
                                    , QString const& de_grid, QString const& dx_grid
                                    , bool watchdog_timeout, QString const& sub_mode
-                                   , bool fast_mode, bool tx_first, bool force)
+                                   , bool fast_mode, quint8 special_op_mode, quint32 tx_tolerance
+                                   , quint32 tr_period, QString const& configuration_name
+                                   , QString const& tx_message, bool force)
 {
   if (m_->server_port_ && !m_->server_string_.isEmpty ())
     {
       QByteArray message;
       NetworkMessage::Builder out {&message, NetworkMessage::Status, m_->id_, m_->schema_};
+      /* CE3TSK/qt6-port: this used to end right after "fast_mode", with a "tx_first" bool
+         tacked on as a 17th field. That was never part of the wire format real WSJT-X ships -
+         current WSJT-X (and every client written against it, GridTracker and JTAlert included)
+         puts "Special operation mode" (quint8) in that exact slot, then three more fields:
+         Frequency tolerance (quint32), TR period (quint32), Configuration name (utf8) and Tx
+         message (utf8). A client reading the modern layout off our shorter, differently-typed
+         message runs past the end of what we actually sent - the field where "tx_first" used to
+         sit gets read back as a special-operation-mode byte by sheer coincidence (both are 1
+         byte), and everything after that is read from whatever the client's receive buffer
+         happened to hold. Observed effect: GridTracker's azimuthal/great-circle map view - the
+         one that visibly reacts to this message - flashed blank on every Status datagram we
+         sent, never on WSJT-X-derived clients that emit the modern layout. Sending the real
+         fields fixes that at the source instead of relying on the receiver's leftover bytes to
+         happen to make sense. "tx_first" itself was never part of the published protocol (no
+         other JTDX code path reads it back in) and is dropped rather than smuggled in somewhere
+         else in the message. */
       out << f << mode.toUtf8 () << dx_call.toUtf8 () << report.toUtf8 () << tx_mode.toUtf8 ()
           << tx_enabled << transmitting << decoding << rx_df << tx_df << de_call.toUtf8 ()
           << de_grid.toUtf8 () << dx_grid.toUtf8 () << watchdog_timeout << sub_mode.toUtf8 ()
-          << fast_mode << tx_first;
+          << fast_mode << special_op_mode << tx_tolerance << tr_period
+          << configuration_name.toUtf8 () << tx_message.toUtf8 ();
       if(force) m_->force_=true;
       m_->send_message (out, message);
     }

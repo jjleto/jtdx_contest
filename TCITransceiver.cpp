@@ -189,8 +189,8 @@ TCITransceiver::TCITransceiver (std::unique_ptr<TransceiverBase> wrapped,QString
   , m_cwLevel {false}
   , m_j0 {-1}
   , m_toneFrequency0 {1500.0}
-  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::DataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
-  , wav_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::DataLocation)).absoluteFilePath ("tx.wav").toStdString()}
+  , debug_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString()}
+  , wav_file_ {QDir(QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)).absoluteFilePath ("tx.wav").toStdString()}
 {
     m_samplesPerFFT = 6912 / 2;
     tci_Ready = false;

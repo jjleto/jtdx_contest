@@ -849,11 +849,18 @@ find_package (Usb REQUIRED)
 #
 
 # Widgets finds its own dependencies.
-find_package (Qt5 COMPONENTS Widgets SerialPort Multimedia LinguistTools WebSockets REQUIRED)
+find_package (Qt6 COMPONENTS Widgets SerialPort Multimedia LinguistTools WebSockets REQUIRED)
+
+# Qt6 headers require C++17; must be set before the older -std=gnu++11 /
+# -std=c++11 flags below are appended (which are kept, matching the same
+# approach used for the wsjt-z qt6-port branch).
+set (CMAKE_CXX_STANDARD 17)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
+add_compile_options ($<$<COMPILE_LANGUAGE:CXX>:-Wno-error=deprecated-declarations>)
 
 if (WIN32)
   add_definitions (-DQT_NEEDS_QTMAIN)
-  find_package (Qt5AxContainer REQUIRED)
+  find_package (Qt6 REQUIRED COMPONENTS AxContainer AxServer)
 endif (WIN32)
 
 #
@@ -917,6 +924,20 @@ if (Fortran_COMPILER_NAME MATCHES "gfortran.*")
 
   set (CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE} -fbounds-check -funroll-all-loops -fno-f2c ${General_FFLAGS}")
   set (CMAKE_Fortran_FLAGS_DEBUG   "${CMAKE_Fortran_FLAGS_DEBUG} -fbounds-check -fno-f2c ${General_FFLAGS}")
+
+  # CE3TSK/qt6-port: gfortran's ABI for the hidden character-length arguments
+  # it appends to every routine taking a character(len=*) dummy argument
+  # changed from "int" to "size_t" in GCC 8. wsjtx_config.h.in used to detect
+  # this via the C/C++ compiler's __GNUC__ macro, which is wrong whenever the
+  # C++ compiler and the Fortran compiler are not the same toolchain - as on
+  # macOS, where C++ is Apple Clang (__GNUC__ pinned at 4 for compatibility)
+  # but Fortran is a real, modern Homebrew gfortran. Detect it from the
+  # actual Fortran compiler's own CMake-reported version instead.
+  if (CMAKE_Fortran_COMPILER_VERSION VERSION_GREATER_EQUAL 8)
+    set (WSJT_FORTRAN_CHARLEN_IS_SIZE_T 1)
+  else ()
+    set (WSJT_FORTRAN_CHARLEN_IS_SIZE_T 0)
+  endif ()
 elseif (Fortran_COMPILER_NAME MATCHES "ifort.*")
   # ifort (untested)
   set (CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE} -f77rtl ${General_FFLAGS}")
@@ -993,7 +1014,7 @@ endif ()
 #
 # stuff only qmake can tell us
 #
-get_target_property (QMAKE_EXECUTABLE Qt5::qmake LOCATION)
+get_target_property (QMAKE_EXECUTABLE Qt6::qmake LOCATION)
 function (QUERY_QMAKE VAR RESULT)
   exec_program (${QMAKE_EXECUTABLE} ARGS "-query ${VAR}" RETURN_VALUE return_code OUTPUT_VARIABLE output)
   if (NOT return_code)
@@ -1093,13 +1114,13 @@ foreach (lang_ ${LANGUAGES})
 endforeach ()
 if (UPDATE_TRANSLATIONS)
   message (STATUS "UPDATE_TRANSLATIONS option is set.")
-  qt5_create_translation (
+  qt6_create_translation (
     QM_FILES ${wsjt_qt_UISRCS} ${wsjtx_UISRCS} ${wsjt_qt_CXXSRCS} ${wsjtx_CXXSRCS}
     ${TS_FILES}
     OPTIONS -source-language en_US
     )
 else ()
-  qt5_add_translation (QM_FILES ${TS_FILES})
+  qt6_add_translation (QM_FILES ${TS_FILES})
 endif ()
 add_custom_target (translations DEPENDS ${QM_FILES})
 set_property (DIRECTORY PROPERTY CLEAN_NO_CUSTOM TRUE)
@@ -1132,11 +1153,11 @@ configure_file (jtdx.qrc.in jtdx.qrc @ONLY)
 
 
 # UI generation
-qt5_wrap_ui (wsjt_qt_GENUISRCS ${wsjt_qt_UISRCS})
-qt5_wrap_ui (wsjtx_GENUISRCS ${wsjtx_UISRCS})
+qt6_wrap_ui (wsjt_qt_GENUISRCS ${wsjt_qt_UISRCS})
+qt6_wrap_ui (wsjtx_GENUISRCS ${wsjtx_UISRCS})
 
 # Resource generation
-qt5_add_resources (wsjtx_RESOURCES_RCC 
+qt6_add_resources (wsjtx_RESOURCES_RCC 
   ${CMAKE_BINARY_DIR}/jtdx.qrc
   contrib/QDarkStyleSheet/qdarkstyle/dark/darkstyle.qrc
 )
@@ -1166,6 +1187,36 @@ target_link_libraries (wsjt_fort  ${FFTW3_LIBRARIES})
 if (OpenMP_C_FLAGS)
   set_target_properties (wsjt_fort PROPERTIES COMPILE_FLAGS "${OpenMP_C_FLAGS}")
 endif ()
+if (APPLE)
+  # On Mac we don't have working OpenMP support in the C/C++ compilers, so
+  # OpenMP_C_FLAGS is typically empty here even though gfortran (the
+  # Homebrew GNU toolchain used for the Fortran sources) supports OpenMP
+  # fine - set the Fortran flag directly, exactly as already done below
+  # for wsjt_fort_omp. Without this, the "!$ use omp_lib" sentinel lines
+  # in the Fortran sources never activate (no -fopenmp => plain comment),
+  # so omp_get_num_procs () has no declared interface and gfortran's
+  # implicit typing rules silently treat it as REAL instead of INTEGER -
+  # which surfaces as a "Type mismatch in argument 'ncores'" error deep in
+  # decoder.f90, since jtdx itself links the plain wsjt_fort on Apple
+  # (see the "if (APPLE) ... target_link_libraries (jtdx ... wsjt_fort ..."
+  # further down), not wsjt_fort_omp.
+  target_compile_options (wsjt_fort
+    PRIVATE
+    $<$<COMPILE_LANGUAGE:Fortran>:-fopenmp>   # assumes GNU style Fortran compiler
+    )
+  # CE3TSK/qt6-port: -fopenmp above is a compile-time flag only. Now that
+  # four2a.f90 (part of wsjt_fort) actually emits "!$omp critical" sections,
+  # its object file references the GNU OpenMP runtime symbols
+  # (GOMP_critical_name_start/end), which are NOT pulled in automatically at
+  # link time. Every executable that links wsjt_fort directly (ft4sim,
+  # ft8sim, ft8sim_gfsk, jt65sim, jt9sim, jt10sim, jt65code, jt9code, and
+  # jtdx itself on Apple) would otherwise fail with "Undefined symbols ...
+  # _GOMP_critical_name_start/_end". Adding gomp/gcc_s.1 here, on the
+  # library target itself, propagates to all of them transitively - same
+  # libraries already used explicitly for jtdxjt9 below (which links
+  # wsjt_fort_omp instead of wsjt_fort).
+  target_link_libraries (wsjt_fort gomp gcc_s.1) # assume GNU libgcc OpenMP runtime
+endif (APPLE)
 # CE3TSK: and keep the plain variant's module files out of the build root - gfortran searches
 # the working directory (the build root) before any -I path, so a plain module there that is
 # one edit behind shadows the OpenMP variant's fresh one whenever a module changes.
@@ -1200,14 +1251,14 @@ endif (${OPENMP_FOUND} OR APPLE)
 add_library (wsjt_qt STATIC ${wsjt_qt_CXXSRCS} ${wsjt_qt_GENUISRCS} ${GENAXSRCS})
 # set wsjtx_udp exports to static variants
 target_compile_definitions (wsjt_qt PUBLIC UDP_STATIC_DEFINE)
-target_link_libraries (wsjt_qt Hamlib::Hamlib Qt5::Widgets Qt5::Network Qt5::WebSockets)
+target_link_libraries (wsjt_qt Hamlib::Hamlib Qt6::Widgets Qt6::Network Qt6::WebSockets)
 #target_include_directories (wsjt_qt BEFORE PRIVATE ${hamlib_INCLUDE_DIRS})
 if (WIN32)
-  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase)
+  target_link_libraries (wsjt_qt Qt6::AxContainer Qt6::AxBase)
 endif (WIN32)
 
 add_library (wsjt_qtmm STATIC ${wsjt_qtmm_CXXSRCS} ${wsjt_qtmm_GENUISRCS})
-target_link_libraries (wsjt_qtmm Qt5::Multimedia)
+target_link_libraries (wsjt_qtmm Qt6::Multimedia)
 
 add_executable (ft4sim lib/ft4/ft4sim.f90 jtdx.rc)
 target_link_libraries (ft4sim wsjt_fort wsjt_cxx)
@@ -1300,9 +1351,9 @@ if (${OPENMP_FOUND} OR APPLE)
 ##       Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/fortran_modules_omp
       )
   endif ()
-  target_link_libraries (jtdxjt9 wsjt_fort_omp wsjt_cxx Qt5::Core)
+  target_link_libraries (jtdxjt9 wsjt_fort_omp wsjt_cxx Qt6::Core)
 else (${OPENMP_FOUND} OR APPLE)
-  target_link_libraries (jtdxjt9 wsjt_fort wsjt_cxx Qt5::Core)
+  target_link_libraries (jtdxjt9 wsjt_fort wsjt_cxx Qt6::Core)
   target_include_directories (jtdxjt9 PRIVATE ${CMAKE_BINARY_DIR}/fortran_modules)   # CE3TSK
 endif (${OPENMP_FOUND} OR APPLE)
 
@@ -1350,9 +1401,9 @@ endif ()
 
 target_include_directories (jtdx PRIVATE ${FFTW3_INCLUDE_DIRS})
 if (APPLE)
-  target_link_libraries (jtdx Qt5::SerialPort wsjt_fort wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES})
+  target_link_libraries (jtdx Qt6::SerialPort wsjt_fort wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES})
 else (APPLE)
-  target_link_libraries (jtdx Qt5::SerialPort wsjt_fort_omp wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES})
+  target_link_libraries (jtdx Qt6::SerialPort wsjt_fort_omp wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES})
   if (OpenMP_C_FLAGS)
     set_target_properties (jtdx PROPERTIES
       COMPILE_FLAGS "${OpenMP_C_FLAGS}"
@@ -1371,7 +1422,7 @@ endif ()
 
 add_resources (message_aggregator_RESOURCES /qss ${message_aggregator_STYLESHEETS})
 configure_file (message_aggregator.qrc.in message_aggregator.qrc @ONLY)
-qt5_add_resources (message_aggregator_RESOURCES_RCC 
+qt6_add_resources (message_aggregator_RESOURCES_RCC 
   ${CMAKE_BINARY_DIR}/message_aggregator.qrc
   contrib/QDarkStyleSheet/qdarkstyle/dark/darkstyle.qrc
 )
@@ -1380,7 +1431,7 @@ add_executable (message_aggregator
   jtdx.rc
   ${message_aggregator_RESOURCES_RCC}
   )
-target_link_libraries (message_aggregator wsjt_qt Qt5::Widgets)
+target_link_libraries (message_aggregator wsjt_qt Qt6::Widgets)
 
 generate_version_info (udp_daemon_jtdx_VERSION_RESOURCES
   NAME udp_daemon_jtdx
@@ -1394,7 +1445,7 @@ add_executable (udp_daemon_jtdx
   jtdx.rc
   ${udp_daemon_jtdx_VERSION_RESOURCES}
   )
-target_link_libraries (udp_daemon_jtdx Qt5::Core Qt5::Network)
+target_link_libraries (udp_daemon_jtdx Qt6::Core Qt6::Network)
 
 if (WSJT_CREATE_WINMAIN)
   set_target_properties (message_aggregator PROPERTIES WIN32_EXECUTABLE ON)
@@ -1534,7 +1585,7 @@ endif (NOT WIN32 AND NOT APPLE)
 #
 if (NOT is_debug_build)
 
-  get_target_property (QtCore_location Qt5::Core LOCATION)
+  get_target_property (QtCore_location Qt6::Core LOCATION)
   get_filename_component (QtCore_location ${QtCore_location} PATH)
   list (APPEND fixup_library_dirs ${QtCore_location})
 

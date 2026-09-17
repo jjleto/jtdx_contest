@@ -167,7 +167,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_jtdxtime {new JTDXDateTime()},
 
   m_env {env},
-  m_dataDir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)},
+  m_dataDir {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)},
   m_valid {true},
   m_revision {revision ()},
   m_multiple {multiple},
@@ -454,6 +454,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_toneSpacing {0.},
   m_geometry_restored {2},
   m_firstDecode {0},
+  m_statusUpdatePending {false},
   m_optimizingProgress {"Optimizing decoder FFTs for your CPU.\n"
       "Please be patient,\n"
       "this may take a few minutes", QString {}, 0, 1, this},
@@ -832,7 +833,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   txMsgButtonGroup->addButton(ui->txrb4,4);
   txMsgButtonGroup->addButton(ui->txrb5,5);
   txMsgButtonGroup->addButton(ui->txrb6,6);
-  connect(txMsgButtonGroup,SIGNAL(buttonClicked(int)),SLOT(set_ntx(int)));
+  connect(txMsgButtonGroup,SIGNAL(idClicked(int)),SLOT(set_ntx(int))); // Qt6: QButtonGroup's int-id signal was renamed buttonClicked(int) -> idClicked(int)
   connect(ui->decodedTextBrowser2,SIGNAL(selectCallsign(bool,bool)),this,SLOT(doubleClickOnCall(bool,bool)));
   connect(ui->decodedTextBrowser,SIGNAL(selectCallsign(bool,bool)),this,SLOT(doubleClickOnCall2(bool,bool)));
   connect(ui->decodedTextBrowser->horizontalScrollBar(),SIGNAL(sliderMoved(int)),SLOT(ScrollBarPosition(int)));
@@ -1134,7 +1135,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   connect (&m_wav_future_watcher, &QFutureWatcher<void>::finished, this, &MainWindow::diskDat);
 
 #if JTDX_DEBUG_TO_FILE
-  FILE * pFile = fopen (QDir(QStandardPaths::writableLocation (QStandardPaths::DataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString().c_str(),"a");  
+  FILE * pFile = fopen (QDir(QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)).absoluteFilePath ("jtdx_debug.txt").toStdString().c_str(),"a");  
   fprintf (pFile,"%s(%0.1f) JTDX v%s start, performance %d threads\n",m_jtdxtime->currentDateTimeUtc2().toString("hh:mm:ss.zzz").toStdString().c_str(),m_jtdxtime->GetOffset(),
       (version() + (m_tci ? " tci " : " ") + revision()).toStdString().c_str(),QThread::idealThreadCount ());
   fclose (pFile);
@@ -2316,11 +2317,9 @@ QString MainWindow::save_wave_file (QString const& name, short const * data, int
   // without suitable synchronization.
   //
   QAudioFormat format;
-  format.setCodec ("audio/pcm");
   format.setSampleRate (12000);
   format.setChannelCount (1);
-  format.setSampleSize (16);   /* the native depth again since 2026-09-03, AUDIO_DEPTH_PLAN.md */
-  format.setSampleType (QAudioFormat::SignedInt);
+  format.setSampleFormat (QAudioFormat::Int16);   /* the native depth again since 2026-09-03, AUDIO_DEPTH_PLAN.md */
   auto source = QString {"%1, %2"}.arg (my_callsign).arg (my_grid);
   auto comment = QString {"Mode=%1%2, Freq=%3%4"}
      .arg (mode)
@@ -3308,6 +3307,22 @@ void MainWindow::on_actionOpen_triggered()                     //Open File
    never shown to the operator */
 static QString const EXISTS {QStringLiteral ("__exists__")};
 
+/* CE3TSK/Qt6: QAudioFormat dropped sampleSize ()/sampleType () - the bit depth and
+   signedness are now both folded into a single SampleFormat enum (this fork only ever
+   produces/consumes UInt8, Int16 or Int32 - never Float). This recovers the old "bits"
+   integer from that enum for messages and arithmetic below. */
+static int bits_for_sample_format (QAudioFormat::SampleFormat f)
+{
+  switch (f)
+    {
+    case QAudioFormat::UInt8: return 8;
+    case QAudioFormat::Int16: return 16;
+    case QAudioFormat::Int32: return 32;
+    case QAudioFormat::Float: return 32;
+    default: return 0;
+    }
+}
+
 bool MainWindow::convert_wav_depth (QString const& fname, QString& oname, int& out_bits, QString& err)
 {
   BWFFile in {QAudioFormat {}, fname};
@@ -3317,8 +3332,8 @@ bool MainWindow::convert_wav_depth (QString const& fname, QString& oname, int& o
       return false;
     }
   auto const& fmt = in.format ();
-  int const bits = fmt.sampleSize ();
-  if ((16 != bits && 32 != bits) || QAudioFormat::SignedInt != fmt.sampleType ()
+  int const bits = bits_for_sample_format (fmt.sampleFormat ());
+  if ((QAudioFormat::Int16 != fmt.sampleFormat () && QAudioFormat::Int32 != fmt.sampleFormat ())
       || 1 != fmt.channelCount ())
     {
       err = tr ("is not a mono 16 or 32 bit signed integer wav (%1 bit, %2 channel(s))")
@@ -3361,7 +3376,7 @@ bool MainWindow::convert_wav_depth (QString const& fname, QString& oname, int& o
     }
 
   QAudioFormat ofmt = fmt;
-  ofmt.setSampleSize (out_bits);
+  ofmt.setSampleFormat (16 == out_bits ? QAudioFormat::Int16 : QAudioFormat::Int32);
   /* CE3TSK: BWFFile's read keeps each LIST-INFO value's terminating NUL and its write
      appends another - a pre-existing round trip asymmetry that grows every value by one NUL
      per pass. Nothing in JTDX read-then-wrote metadata before this converter, so it never
@@ -3422,7 +3437,7 @@ void MainWindow::on_actionConvert_bit_depth_triggered()
          helper corrects it. */
       BWFFile probe {QAudioFormat {}, fname};
       int probe_bits = 0;
-      if (probe.open (BWFFile::ReadOnly)) { probe_bits = probe.format ().sampleSize (); probe.close (); }
+      if (probe.open (BWFFile::ReadOnly)) { probe_bits = bits_for_sample_format (probe.format ().sampleFormat ()); probe.close (); }
       /* the name is always derived from the source; only the directory follows the operator -
          the last place a converted copy was saved, or beside the source until there is one */
       QString const outdir = m_convertOutPath.isEmpty () ? fi.path () : m_convertOutPath;
@@ -3490,9 +3505,9 @@ void MainWindow::read_wav_file (QString const& fname)
       qint64 max_bytes = qint64 (capacity) * bytes_per_frame;
       auto n = file.read (reinterpret_cast<char *> (dec_data.d2), std::min (max_bytes, file.size ()));
       frames_read = n / bytes_per_frame;
-      short sample_size = format.sampleSize ();
+      short sample_size = bits_for_sample_format (format.sampleFormat ());
       wav12_ (dec_data.d2, dec_data.d2, &frames_read, &sample_size);
-    } else if (16 == format.sampleSize () && QAudioFormat::SignedInt == format.sampleType ()
+    } else if (QAudioFormat::Int16 == format.sampleFormat ()
                && 1 == format.channelCount ()) {   /* stereo would interleave-mangle */
       /* the native depth again since 2026-09-03 (AUDIO_DEPTH_PLAN.md): WSJT-X, JTDX and
          this fork all write these - a plain read into d2. BWFFile has parsed the real chunk
@@ -3500,7 +3515,7 @@ void MainWindow::read_wav_file (QString const& fname)
       qint64 max_bytes = qint64 (capacity) * bytes_per_frame;
       auto n = file.read (reinterpret_cast<char *> (dec_data.d2), std::min (max_bytes, file.size ()));
       frames_read = n / bytes_per_frame;
-    } else if (32 == format.sampleSize () && QAudioFormat::SignedInt == format.sampleType ()
+    } else if (QAudioFormat::Int32 == format.sampleFormat ()
                && 1 == format.channelCount ()) {
       /* CE3TSK: a 32 bit file - every recording this fork saved before 2026-09-03 and all of
          its archived benchmark sets - contracted to 16 bit on the fly, the top 16 bits kept
@@ -3521,8 +3536,8 @@ void MainWindow::read_wav_file (QString const& fname)
       if(m_config.write_decoded() || m_config.write_decoded_debug()) writeToALLTXT("32-bit wav file contracted to 16-bit on the fly");
     } else {
       /* float or 8 bit: reading it raw would decode as noise and look like a JTDX fault */
-      writeToALLTXT (QString {"Unsupported wav format: %1 bit, sample type %2, %3 channel(s) - file not read"}
-                     .arg (format.sampleSize ()).arg (int (format.sampleType ())).arg (format.channelCount ()));
+      writeToALLTXT (QString {"Unsupported wav format: %1 bit, sample format %2, %3 channel(s) - file not read"}
+                     .arg (bits_for_sample_format (format.sampleFormat ())).arg (int (format.sampleFormat ())).arg (format.channelCount ()));
     }
     /* CE3TSK: zero the unfilled remainder, in elements. The old code added the BYTE count n
        to the sample pointer d2, advancing twice (four times, while d2 was int) too far -
@@ -5147,6 +5162,15 @@ void MainWindow::process_Auto()
     } else  if (m_transmittedQSOProgress != CALLING){
         on_txb6_clicked();
         if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx6->text());
+        /* CE3TSK/qt6-port: AutoTx's "re-arm Enable Tx automatically" only fired from
+           doubleClickOnCall() (manually answering a decoded station). When autoseq itself
+           falls back to CQ here - typically right after a QSO just ended and
+           endOfQsoStopTx()/haltTx() switched Enable Tx off - nothing turned it back on, so
+           with Autolog + AutoSeq + AutoTx all enabled the operator was left parked on
+           "Receiving" with a CQ message loaded but never sent. Single shot QSO is the
+           deliberate "stop after one contact" feature and must keep doing exactly that, so
+           it is explicitly excluded here. */
+        if (m_autoTx && !m_enableTx && !m_singleshot) ui->enableTxButton->click();
     }
   }
 //  printf("%s(%0.1f) process_Auto: %s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",m_jtdxtime->currentDateTimeUtc2().toString("hh:mm:ss.zzz").toStdString().c_str(),m_jtdxtime->GetOffset(),m_hisCall.toStdString().c_str(),hisCall.toStdString().c_str(),m_lastloggedcall.toStdString().c_str(),mode.toStdString().c_str(),m_status,prio,ui->TxFreqSpinBox->value (),m_used_freq,m_callMode,m_callPrioCQ,m_reply_other,m_reply_me,counters2);
@@ -5270,6 +5294,36 @@ void MainWindow::process_Auto()
        else if(m_houndMode) { endOfQsoStopTx("m_houndMode, counter triggered "); }
     }
   }
+  /* CE3TSK/qt6-port: the CQ/AutoTx re-arm above (in the "hisCall.isEmpty () ..." branch) only
+     fires when m_hisCall is *already* empty at the top of this function, i.e. when a previous
+     pass already released the DX call and this pass just failed to find a new candidate. It
+     never fires on the pass that actually finishes the QSO: SRR73/S73/FIN (and the two counter-
+     triggered cases just above) call endOfQsoStopTx() from inside the switch below, which halts
+     Tx and clears the DX call right here, in this same call - one call too late for the earlier
+     check, which had already been skipped for this pass because hisCall was still non-empty
+     when it ran. That left a guaranteed one-cycle gap: Enable Tx switches off at the "73", the
+     Tx slot that should have carried the next CQ is lost sitting in Rx, and AutoTx only catches
+     up and re-enables Tx on the following cycle. Checking again here, after the QSO-finished
+     handling above has had its chance to clear m_hisCall, closes that gap. Same exclusions as
+     the other check (Single shot QSO, Hound mode, Call None) so this changes nothing for anyone
+     not relying on continuous AutoTx.
+
+     m_transmittedQSOProgress != CALLING is the same guard the other check already relies on,
+     and it turned out to matter here too: without it, this check has no way to tell "a QSO the
+     sequencer was running just concluded" apart from "the app just started, or the operator
+     just switched AutoTx on, and nothing has happened yet" - both leave m_hisCall empty and
+     Enable Tx off, which is the normal, correct resting state. m_transmittedQSOProgress records
+     the kind of message we last actually transmitted, and CALLING is specifically "sending CQ
+     (or nothing yet)" - it is what clearDX() resets it towards and what it starts out as, and it
+     only moves to REPLYING/REPORT/ROGER_REPORT/ROGERS/SIGNOFF once we have actually sent some
+     part of a real exchange (answering a CQ counts - that is REPLYING, not CALLING). So this is
+     true exactly when the sequencer had gotten somewhere with a station before things stopped,
+     and false at a fresh start or a bare AutoTx toggle, where nothing has been transmitted at
+     all. Without this guard, Enable Tx switched itself on and sent CQ merely because
+     AutoTx was on and the DX field happened to be empty - with no QSO ever having run - which is
+     wrong: AutoTx must only resume a sequence, never start one that Enable Tx was never asked to
+     start in the first place. */
+  if (m_transmittedQSOProgress != CALLING && m_autoTx && !m_enableTx && !m_transmitting && !m_singleshot && !m_houndMode && m_callMode!=0 && m_hisCall.isEmpty()) ui->enableTxButton->click();
 }
 
 void MainWindow::readFromStdout()                             //readFromStdout
@@ -5614,7 +5668,20 @@ void MainWindow::readFromStdout()                             //readFromStdout
       } else if (!deCall.isEmpty() && Radio::base_callsign (deCall) == Radio::base_callsign (m_hisCall) && decodedtextmsg.left(3) != "CQ " && decodedtextmsg.left(3) != "DE " && decodedtextmsg.left(4) != "QRZ " && !decodedtextmsg.contains(" 73") && !decodedtextmsg.contains(" RR73") && !decodedtextmsg.contains(" RRR")) {
         m_used_freq = decodedtext.frequencyOffset();
          if (haltTxWhenFrequencyTaken ()) {
-           haltTx("readFromStdout, not owner of the frequency or reply to other ");/* if(m_skipTx1) m_qsoHistory.remove(m_hisCall); */
+           /* CE3TSK/qt6-port: this used to be a bare haltTx(), which stops the transmitter but
+              leaves m_hisCall (and the DX Call field) pointing at the station we just gave up
+              on. process_Auto() only ever looks for a *new* candidate (or falls back to CQ)
+              when m_hisCall is empty (see the "hisCall.isEmpty ()" gate a bit further down in
+              this file); as long as m_hisCall still names this station, every later pass keeps
+              re-checking its own stalled exchange with hisCall and never reaches the CQ/AutoTx
+              fallback. With Autolog + AutoSeq + AutoTx enabled, the operator was left with
+              "Enable Tx" off and nothing transmitting at all - CQ or otherwise - until Enable Tx
+              was clicked by hand. autoStopTx() is the same halt already used for a normally
+              finished QSO, and (like there) only clears the DX call when the operator's own
+              settings say a stalled contact should be released automatically (Autolog or
+              "Clear DX call and grid" - never in Hound mode); with neither set, this is
+              unchanged from the previous plain haltTx(). */
+           autoStopTx("readFromStdout, not owner of the frequency or reply to other ");/* if(m_skipTx1) m_qsoHistory.remove(m_hisCall); */
          }
       }
 
@@ -5643,7 +5710,7 @@ void MainWindow::readFromStdout()                             //readFromStdout
             // qDebug() << "To PSKreporter:" << deCall << grid << frequency << msgmode << snr;
             psk_Reporter->addRemoteStation(deCall,grid,QString::number(frequency),msgmode,
                                            QString::number(snr),
-                                           QString::number(m_jtdxtime->currentDateTime2().toTime_t()));
+                                           QString::number(m_jtdxtime->currentDateTime2().toSecsSinceEpoch()));
           }
       }
     }
@@ -6019,7 +6086,7 @@ void MainWindow::guiUpdate()
 #endif
 
           if(m_config.write_decoded_debug()) {
-            QString autoseqa=ui->AutoSeqButton->text(); int indx=autoseqa.length()-1; QString autoseq="AutoSeq"+autoseqa[indx];
+            QString autoseqa=ui->AutoSeqButton->text(); int indx=autoseqa.length()-1; QString autoseq=QString{"AutoSeq"}+autoseqa[indx];
             out << m_jtdxtime->currentDateTimeUtc2().toString("yyyyMMdd_hhmmss.zzz") << "(" << m_jtdxtime->GetOffset() << ")"
                 << "  AF TX/RX " << ui->TxFreqSpinBox->value () << "/" << ui->RxFreqSpinBox->value ()
                 << "Hz " << autoseq << (m_autoseq ? "-On" : "-Off") << " AutoTx" 
@@ -6145,7 +6212,7 @@ void MainWindow::guiUpdate()
       if (f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Append)) {
         QTextStream out(&f);
         if(m_config.write_decoded_debug()) {
-          QString autoseqa=ui->AutoSeqButton->text(); int indx=autoseqa.length()-1; QString autoseq="AutoSeq"+autoseqa[indx];
+          QString autoseqa=ui->AutoSeqButton->text(); int indx=autoseqa.length()-1; QString autoseq=QString{"AutoSeq"}+autoseqa[indx];
           out << m_jtdxtime->currentDateTimeUtc2().toString("yyyyMMdd_hhmmss.zzz") << "(" << m_jtdxtime->GetOffset() << ")"
               << "  JTDX v" << QCoreApplication::applicationVersion () << revision () <<" Transmitting " << qSetRealNumberPrecision (12)
               << (m_freqNominal / 1.e6) << " MHz + " << ui->TxFreqSpinBox->value () <<"Hz  " << m_modeTx << ":  " << m_currentMessage <<
@@ -6310,7 +6377,13 @@ void MainWindow::guiUpdate()
     displayDialFrequency ();
     if (m_geometry_restored > 0) { m_geometry_restored -=1;
       /* CE3TSK: the delayed re-restore would undo the clamp applied at start-up */
-      if (m_geometry_restored == 0) { restoreGeometry (m_geometry); resize (size ().expandedTo (sizeHint ())); } }
+      if (m_geometry_restored == 0) {
+        restoreGeometry (m_geometry); resize (size ().expandedTo (sizeHint ()));
+        /* CE3TSK/qt6-port: WideGraph is hit by the exact same start-up clamping as this window
+           - see WideGraph::reRestoreGeometry() - so give it the same delayed second chance,
+           piggy-backing on this already-proven timer instead of adding a separate one there. */
+        m_wideGraph->reRestoreGeometry ();
+      } }
     /* CE3TSK: the safety net behind ndecreq. The request counter should make a lost decode
        impossible; this catches anything that still wedges the pair - the decoder killed, a
        shared-memory mishap - and turns a dead session into one lost period. Recreating .lock
@@ -9391,11 +9464,30 @@ void MainWindow::replyToUDP (QTime time, qint32 snr, float delta_time, quint32 d
 // provide JTAlert->Log4OM interaction in scenario where the call is in DX Call window:
           if(message_text.contains(" " + m_hisCall + " ")) {
             QChar submode {0};
-            m_messageClient->status_update (m_freqNominal, m_mode, m_hisCall, QString::number (ui->rptSpinBox->value ()),
+            /* CE3TSK/qt6-port: m_hisCall/m_hisGrid are only ever a null QString right after
+               on_dxCallEntry_textChanged() clears a previously non-empty value - the constructor
+               starts them at QString {""} (empty but NOT null - see m_hisCall {""} above), and
+               every other path that leaves them empty (UI text, .toUpper().trimmed() applied to
+               empty UI text, ...) preserves that non-null emptiness. Real WSJT-X's equivalent
+               stays a genuinely null QString whenever there is no DX target, which on the wire
+               serializes with a different length marker (0xFFFFFFFF vs our 0 - see the QDataStream
+               QByteArray convention noted in MessageClient::status_update()). Confirmed by packet
+               capture: our Status messages send DxCall/DxGrid as empty-non-null even when idle,
+               wsjt-z's send them null. GridTracker's azimuthal map view treats those two cases
+               differently - null is "no change", empty is "target is now nothing", so every one of
+               our Status datagrams sent while idle told it to drop the great-circle line and redraw,
+               which is what looked like a flash tied to every decode-cycle Status update. Normalizing
+               to a real null here (and in the coalesced path in statusUpdate() below) whenever the
+               field is logically empty matches what a schema-compliant client actually expects. */
+            m_messageClient->status_update (m_freqNominal, m_mode, m_hisCall.isEmpty () ? QString {} : m_hisCall,
+                                            QString::number (ui->rptSpinBox->value ()),
                                             m_modeTx, ui->enableTxButton->isChecked (), m_transmitting, m_decoderBusy,
                                             ui->RxFreqSpinBox->value (), ui->TxFreqSpinBox->value (),
-                                            m_config.my_callsign (), m_config.my_grid (), m_hisGrid, m_txwatchdog,
-                                            submode != QChar::Null ? QString {submode} : QString {}, false, m_txFirst, true);
+                                            m_config.my_callsign (), m_config.my_grid (),
+                                            m_hisGrid.isEmpty () ? QString {} : m_hisGrid, m_txwatchdog,
+                                            submode != QChar::Null ? QString {submode} : QString {}, false,
+                                            quint8 (m_houndMode ? 6 : 0), 0u, quint32 (qRound (m_TRperiod)),
+                                            QStringLiteral ("Default"), m_currentMessage, true);
           }
           if (m_config.udpWindowToFront ()) {
               show ();
@@ -9666,8 +9758,11 @@ void MainWindow::uploadResponse(QString response)
   }
 }
 
-void MainWindow::on_TxPowerComboBox_currentIndexChanged(const QString &arg1)
+void MainWindow::on_TxPowerComboBox_currentIndexChanged(int index)
 {
+  // Qt6: QComboBox::currentIndexChanged (QString) was removed, only the
+  // int overload remains - recover the item text ourselves.
+  QString const arg1 = ui->TxPowerComboBox->itemText (index);
   int i1=arg1.indexOf(" ");
   m_dBm=arg1.left(i1).toInt();
 }
@@ -9784,18 +9879,51 @@ void MainWindow::toggle_skipTx1 ()
   }
 }
 
-void MainWindow::statusUpdate () const
+void MainWindow::statusUpdate ()
 {
   if (!ui) return;
-  QChar submode {0};
-  m_messageClient->status_update (m_freqNominal, m_mode, m_hisCall,
-                                  QString::number (ui->rptSpinBox->value ()),
-                                  m_modeTx, ui->enableTxButton->isChecked (),
-                                  m_transmitting, m_decoderBusy,
-                                  ui->RxFreqSpinBox->value (), ui->TxFreqSpinBox->value (),
-                                  m_config.my_callsign (), m_config.my_grid (),
-                                  m_hisGrid, m_txwatchdog, submode != QChar::Null ? QString {submode} : QString {},
-                                  false, m_txFirst, false);
+  /* CE3TSK/qt6-port: several places that change the DX Call/DX Grid fields as one logical
+     action (clearDXfields(), a new candidate picked up by process_Auto(), ...) end up calling
+     this once per field, because each QLineEdit fires its own textChanged handler. Sent as-is,
+     that is two (or more) separate Status UDP datagrams within the same GUI event, one of them
+     carrying a transient empty/half-updated DX call or grid. Third-party UDP clients that key a
+     redraw off this datagram (observed with GridTracker's azimuthal/great-circle map, which
+     flashes blank on each one) then redraw once per datagram instead of once per actual change.
+     Coalescing repeat calls within the same event-loop pass into a single deferred send (still
+     effectively immediate - next iteration of the event loop) fixes that without changing what
+     gets reported: by the time the timer fires, all the fields involved already hold their
+     final value. Calls that are genuinely spaced out in time (e.g. decodeBusy(true) then
+     decodeBusy(false) a decode later) are unaffected, since the pending flag is already
+     cleared by the time the next one arrives. */
+  if (m_statusUpdatePending) return;
+  m_statusUpdatePending = true;
+  QTimer::singleShot (0, this, [this] () {
+      m_statusUpdatePending = false;
+      if (!ui) return;
+      QChar submode {0};
+      /* CE3TSK/qt6-port: special_op_mode/tolerance/tr_period/configuration_name/tx_message are
+         the fields real WSJT-X sends here (see the long comment in
+         MessageClient::status_update()) - special_op_mode reuses m_houndMode (jtdx_contest does
+         not implement the Fox side, only Hound), tolerance has no equivalent setting in this
+         fork so it goes out as 0, tr_period is our own m_TRperiod rounded to whole seconds, and
+         configuration_name is a fixed "Default" since this fork does not track named
+         configurations the way stock WSJT-X does - none of the four are load-bearing for any
+         client, they just have to be the right type and be present so the message ends where a
+         client expects it to. */
+      /* CE3TSK/qt6-port: normalize DxCall/DxGrid to a real null QString when logically empty -
+         see the long comment at the other status_update() call site in readFromStdout() for why
+         (GridTracker's azimuthal map flash). */
+      m_messageClient->status_update (m_freqNominal, m_mode, m_hisCall.isEmpty () ? QString {} : m_hisCall,
+                                      QString::number (ui->rptSpinBox->value ()),
+                                      m_modeTx, ui->enableTxButton->isChecked (),
+                                      m_transmitting, m_decoderBusy,
+                                      ui->RxFreqSpinBox->value (), ui->TxFreqSpinBox->value (),
+                                      m_config.my_callsign (), m_config.my_grid (),
+                                      m_hisGrid.isEmpty () ? QString {} : m_hisGrid, m_txwatchdog,
+                                      submode != QChar::Null ? QString {submode} : QString {},
+                                      false, quint8 (m_houndMode ? 6 : 0), 0u, quint32 (qRound (m_TRperiod)),
+                                      QStringLiteral ("Default"), m_currentMessage, false);
+    });
 }
 
 void MainWindow::childEvent (QChildEvent * e)
