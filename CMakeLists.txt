@@ -273,6 +273,7 @@ set (wsjtx_CXXSRCS
   WSPRBandHopping.cpp
   JTDXMessageBox.cpp
   JTDXDateTime.cpp
+  FileDownload.cpp
   )
 
 set (wsjt_CXXSRCS
@@ -296,6 +297,14 @@ if (WIN32)
   set (wsjt_qt_CXXSRCS
     ${wsjt_qt_CXXSRCS}
     OmniRigTransceiver.cpp
+    )
+
+  # CE3TSK 2026-09-15: FileDownload's Windows transport. Qt 5.15.2 can only do TLS through
+  # OpenSSL 1.1, which neither Qt nor Windows ships, so on Windows the fetch goes through
+  # WinHTTP and Schannel instead and the installer carries no crypto library at all.
+  set (wsjtx_CXXSRCS
+    ${wsjtx_CXXSRCS}
+    WinHttpFetch.cpp
     )
 endif (WIN32)
 
@@ -378,6 +387,7 @@ set (wsjt_FSRCS
   lib/ft4_mod1.f90
   lib/ft4/ft4_downsample.f90
   lib/ft4/ft4sim.f90
+  lib/ft2/ft2sim.f90
   lib/ft8_decode.f90
   lib/ft8_downsample.f90
   lib/ft8_mod1.f90
@@ -1264,6 +1274,10 @@ add_executable (ft4sim lib/ft4/ft4sim.f90 jtdx.rc)
 target_link_libraries (ft4sim wsjt_fort wsjt_cxx)
 target_include_directories (ft4sim PRIVATE ${CMAKE_BINARY_DIR}/fortran_modules)   # CE3TSK
 
+add_executable (ft2sim lib/ft2/ft2sim.f90 jtdx.rc)   # CE3TSK: FT2 is FT4's frame at twice the rate
+target_link_libraries (ft2sim wsjt_fort wsjt_cxx)
+target_include_directories (ft2sim PRIVATE ${CMAKE_BINARY_DIR}/fortran_modules)   # CE3TSK
+
 add_executable (ft8sim lib/ft8sim.f90 jtdx.rc)
 target_link_libraries (ft8sim wsjt_fort wsjt_cxx)
 target_include_directories (ft8sim PRIVATE ${CMAKE_BINARY_DIR}/fortran_modules)   # CE3TSK
@@ -1400,6 +1414,9 @@ if (APPLE)
 endif ()
 
 target_include_directories (jtdx PRIVATE ${FFTW3_INCLUDE_DIRS})
+if (WIN32)
+  target_link_libraries (jtdx winhttp)   # CE3TSK: WinHttpFetch, FileDownload's Windows transport
+endif ()
 if (APPLE)
   target_link_libraries (jtdx Qt6::SerialPort wsjt_fort wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES})
 else (APPLE)

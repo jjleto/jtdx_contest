@@ -443,6 +443,71 @@ Vorming:
         <source>Are you sure you want to discard your current contest frequencies and replace them with the FT8 and FT4 entries from the working frequencies?</source>
         <translation>Kas olete kindel, et soovite praegused võistlussagedused kõrvale jätta ja asendada need töösageduste FT8- ja FT4-kirjetega?</translation>
     </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The downloaded file is not a cty.dat file.</source>
+        <translation>Allalaaditud fail ei ole cty.dat-fail.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The downloaded file is not a LoTW user activity file.</source>
+        <translation>Allalaaditud fail ei ole LoTW kasutajate aktiivsuse fail.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>SSL/TLS support is not installed, so %1 cannot be fetched.</source>
+        <translation>SSL/TLS-tugi ei ole paigaldatud, seega %1 ei saa alla laadida.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The server answered with HTTP status %1.</source>
+        <translation>Server vastas HTTP olekuga %1.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The download was stopped at %1 MB.</source>
+        <translation>Allalaadimine peatati %1 MB juures.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The file could not be saved: %1</source>
+        <translation>Faili ei õnnestunud salvestada: %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>Network error: %1</source>
+        <translation>Võrguviga: %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>Download of %1 failed</source>
+        <translation>%1 allalaadimine ebaõnnestus</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The copy in use has not been changed.</source>
+        <translation>Kasutusel olevat koopiat ei muudetud.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>downloading...</source>
+        <translation>laadin alla...</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>version unknown</source>
+        <translation>versioon teadmata</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>%1, bundled with this release</source>
+        <translation>%1, kaasas selle versiooniga</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>%1, downloaded</source>
+        <translation>%1, allalaaditud</translation>
+    </message>
 </context>
 <context>
     <name>CountryDat</name>
@@ -1093,7 +1158,7 @@ Vorming:
     </message>
     <message>
         <location filename="../logbook/countrydat.cpp" line="164"/>
-        <source>St. Pierre &amp; Miquelo</source>
+        <source>St. Pierre &amp; Miquelon</source>
         <translation>Saint-Pierre ja Miquelon</translation>
     </message>
     <message>
@@ -2926,12 +2991,6 @@ Vorming:
         <translation>Algus</translation>
     </message>
     <message>
-        <location filename="../logqso.ui" line="82"/>
-        <location filename="../logqso.ui" line="114"/>
-        <source>dd/MM/yyyy HH:mm:ss</source>
-        <translation>dd-MM-yyyy HH:mm:ss</translation>
-    </message>
-    <message>
         <location filename="../logqso.ui" line="98"/>
         <source>End</source>
         <translation>Lõpp</translation>
@@ -3026,18 +3085,6 @@ Vorming:
         <location filename="../mainwindow.ui" line="282"/>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Lost audio blocks. FT8 15sec interval has 52 blocks of audio data, where decoder being triggered if audio data reached 51 blocks in &apos;SWL/late strat of decoder&apos; modes or 50 blocks otherwise. Under Windows OS there were multiple reports audio data being lost, for Windows OS there is workaround implemented to start FT8 decoder if there at least 46 out of 52 audio blocks received. Lost audio blocks notification lets user know there is something wrong in the setup.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Kaotatud heli andmed. FT8 15sek intervall-s on 52 blokki heli andmeid, kus dekooder käivitatakse kui 51 blokki on kätte saadud SWL režiimis või 50 blokki tavarežiimis.Windows OS jaoks on tehtud erand, et vähemalt 46 bloki olemasolul käivitatakse ka dekooder. Puudu audio indikaator näitab, et arvutil on heli kättesaamisega probleeme.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>
-    </message>
-    <message>
-        <location filename="../mainwindow.ui" line="288"/>
-        <location filename="../mainwindow.cpp" line="1885"/>
-        <location filename="../mainwindow.cpp" line="3738"/>
-        <location filename="../mainwindow.cpp" line="3751"/>
-        <location filename="../mainwindow.cpp" line="6284"/>
-        <location filename="../mainwindow.cpp" line="6289"/>
-        <location filename="../mainwindow.cpp" line="6335"/>
-        <location filename="../mainwindow.cpp" line="6346"/>
-        <source>Band Activity</source>
-        <translation>Laineala aktiivsus</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="397"/>
@@ -5385,8 +5432,8 @@ UDP server %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
-        <source>FT8/FT4 threads</source>
-        <translation>FT8/FT4 lõimed</translation>
+        <source>FT* threads</source>
+        <translation>FT* lõimed</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
@@ -5425,8 +5472,8 @@ UDP server %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
-        <source>FT8/FT4 decode bandwidth</source>
-        <translation>FT8/FT4 dekodeerimise ribalaius</translation>
+        <source>FT* decode bandwidth</source>
+        <translation>FT* dekodeerimise ribalaius</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
@@ -5765,6 +5812,31 @@ UDP server %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
+        <source>FT2 decoding</source>
+        <translation>FT2 dekodeerimine</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>default: deep, nothing added  (1457 of 1575 signals on the 240-period set, 0.10 s at reply time)</source>
+        <translation>vaikimisi: sügav, midagi lisatud pole  (1457 signaali 1575-st 240 perioodi komplektil, 0,10 s vastuseajal)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>background 3 with deep OSD, the alternate pass and the residual unit, all in the TX window, nothing at reply time  (+0.5 % on the 240-period set, +7.4 % on the crowded band, 0.10 s; ~1.8 s of idle CPU a period)</source>
+        <translation>taust 3 sügava OSD, alternatiivse käigu ja jäägiüksusega, kõik saateaknas, midagi vastuseajal  (+0,5 % 240 perioodi komplektil, +7,4 % tihedal sagedusalal, 0,10 s; ~1,8 s vaba protsessoriaega perioodi kohta)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>max effort: as many members as fit the 0.5 s RX budget + low thresholds at reply time, six in the TX window with its extras and low thresholds  (+0.7 % in total, +12.5 % on the crowded band, 0.56 s mean, 1.2 s worst period)</source>
+        <translation>maksimaalne pingutus: nii palju liikmeid, kui mahub 0,5 s RX-eelarvesse + madalad lävendid vastuseajal, kuus saateaknas koos selle lisade ja madalate lävenditega  (+0,7 % kokku, +12,5 % tihedal sagedusalal, 0,56 s keskmiselt, 1,2 s halvim periood)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>budget auto: as many members as fit the reply deadline, from this band's measured cost (0.5 s; the rest run in the TX background)</source>
+        <translation>eelarve auto: nii palju liikmeid, kui mahub vastuse tähtaega, selle sagedusala mõõdetud kulu järgi (0,5 s; ülejäänud töötavad saatmise taustal)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
         <source>fast: the shallow decoder, nothing added</source>
         <translation>kiire: pinnapealne dekooder, midagi lisatud pole</translation>
     </message>
@@ -6038,13 +6110,18 @@ Seda küsitakse ainult üks kord.</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
+        <source>Custom - the FT2 RX / TX background controls match no preset</source>
+        <translation>Custom - FT2 RX / TX tausta juhtelemendid ei vasta ühelegi eelseadele</translation>
+    </message>
+    <message>
+        <location filename="../../mainwindow.cpp"/>
         <source>Custom - the FT4 RX / TX background controls match no preset</source>
         <translation>Custom - FT4 RX / TX tausta juhtelemendid ei vasta ühelegi eelseadele</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
-        <source>FT8 / FT4 decoding preset - greyed while the mode is neither</source>
-        <translation>FT8 / FT4 dekodeerimise eelseade - hall, kuni režiim pole kumbki neist</translation>
+        <source>FT* decoding preset - greyed while the mode is none of them</source>
+        <translation>FT* dekodeerimise eelseade - hall, kuni režiim pole ükski neist</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
@@ -6055,6 +6132,16 @@ Seda küsitakse ainult üks kord.</translation>
         <location filename="../../mainwindow.cpp"/>
         <source>ensemble - the RX-only recipe of the former Ensemble preset (no menu entry)</source>
         <translation>ansambel - endise eelseade Ensemble ainult RX retsept (menüükirjet pole)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>Use dar&amp;k style</source>
+        <translation>Ka&amp;suta tumedat stiili</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>Band buttons</source>
+        <translation>Sagedusala nupud</translation>
     </message>
 </context>
 <context>
@@ -9618,6 +9705,46 @@ soundcard changes</source>
         <location filename="../Configuration.ui"/>
         <source>Replace the table with the published default frequencies of the selected contest.</source>
         <translation>Asenda tabel valitud võistluse avaldatud vaikesagedustega.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Translate DXCC na&amp;mes</source>
+        <translation>Tõlgi DXCC ni&amp;med</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Show DXCC names in the language of the user interface. When off, the English names are shown.</source>
+        <translation>Kuva DXCC nimed kasutajaliidese keeles. Välja lülitatuna kuvatakse ingliskeelsed nimed.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Data files</source>
+        <translation>Andmefailid</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>The newer of the downloaded copy and the copy bundled with this release is used.</source>
+        <translation>Kasutatakse uuemat koopiat: allalaaditud või selle versiooniga kaasa pandud.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download the latest cty.dat from country-files.com. The DXCC entities, CQ and ITU zones and continents shown for each call come from it.</source>
+        <translation>Laadi country-files.com-ist alla uusim cty.dat. Iga kutsungi juures näidatavad DXCC-üksused, CQ- ja ITU-tsoonid ning kontinendid pärinevad sellest.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download latest</source>
+        <translation>Laadi uusim</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>LoTW users:</source>
+        <translation>LoTW kasutajad:</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download the latest LoTW user activity file from ARRL. Stations that uploaded to LoTW during the last 365 days are treated as LoTW users.</source>
+        <translation>Laadi ARRL-ist alla uusim LoTW kasutajate aktiivsuse fail. Jaamad, mis on viimase 365 päeva jooksul LoTW-sse üles laadinud, loetakse LoTW kasutajateks.</translation>
     </message>
 </context>
 <context>

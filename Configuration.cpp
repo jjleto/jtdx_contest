@@ -191,6 +191,8 @@ extern "C" {
 #include "StationList.hpp"
 #include "NetworkServerLookup.hpp"
 #include "JTDXMessageBox.hpp"
+#include "FileDownload.hpp"            /* CE3TSK */
+#include "logbook/countrydat.h"       /* CE3TSK */
 
 #include "pimpl_impl.hpp"
 
@@ -199,6 +201,14 @@ extern "C" {
 
 namespace
 {
+  // CE3TSK: on-demand data file updates. The big cty.dat is the variant JTDX bundles (the plain
+  // one lacks the exact-callsign entries), and country-files.com serves it over plain http; ARRL
+  // serves the LoTW file only over https. The names are the ones LogBook::init reads.
+  char const * const cty_url {"http://www.country-files.com/bigcty/cty.dat"};
+  char const * const lotw_url {"https://lotw.arrl.org/lotw-user-activity.csv"};
+  char const * const cty_file_name {"cty.dat"};
+  char const * const lotw_file_name {"lotw-user-activity.csv"};
+
   // these undocumented flag values when stored in (Qt::UserRole - 1)
   // of a ComboBox item model index allow the item to be enabled or
   // disabled
@@ -414,7 +424,7 @@ public:
   using FrequencyDelta = Radio::FrequencyDelta;
   using port_type = Configuration::port_type;
 
-  explicit impl (Configuration * self, QSettings * settings, QWidget * parent);
+  explicit impl (Configuration * self, QNetworkAccessManager * network_manager, QSettings * settings, QWidget * parent);
   ~impl ();
 
   bool have_rig ();
@@ -453,6 +463,7 @@ private:
   void update_audio_channels (QComboBox const *, int, QComboBox *, bool);
 
   void set_application_font (QFont const&);
+  void fit_size_limits ();   // CE3TSK
 
   void initialize_models ();
   /* CE3TSK: force and grey the settings a contest owns */
@@ -540,6 +551,12 @@ private:
   Q_SLOT void handle_transceiver_update (TransceiverState const&, unsigned sequence_number);
   Q_SLOT void handle_transceiver_failure (QString const& reason);
   Q_SLOT void on_countryName_check_box_clicked(bool checked);
+  Q_SLOT void on_cty_download_push_button_clicked (bool);    // CE3TSK: data file updates
+  Q_SLOT void on_lotw_download_push_button_clicked (bool);
+  void start_data_file_download (FileDownload&, char const * url, char const * file_name,
+                                 QDate (* version_of) (QByteArray const&), QString const& not_that_file);
+  void data_file_download_failed (char const * file_name, FileDownload::Failure, QString const& detail);
+  void update_data_file_labels ();
   Q_SLOT void on_callNotif_check_box_clicked(bool checked);
   Q_SLOT void on_otherMessagesMarker_check_box_clicked(bool checked);
   Q_SLOT void on_RR73_marker_check_box_clicked(bool checked);
@@ -642,6 +659,9 @@ private:
   
   QDir doc_dir_;
   QDir data_dir_;
+  QNetworkAccessManager * network_manager_;   // CE3TSK: data file updates
+  FileDownload cty_download_;
+  FileDownload lotw_download_;
   QDir temp_dir_;
   QDir default_save_directory_;
   QDir save_directory_;
@@ -870,6 +890,7 @@ private:
   bool recommendedColorsOffered_;   // CE3TSK: the one-time colour offer has been made
   bool countryName_;
   bool countryPrefix_;
+  bool countryNameTranslated_;   // CE3TSK
   bool callNotif_;
   bool gridNotif_;
   bool otherMessagesMarker_;
@@ -911,8 +932,8 @@ private:
      overwrites them, so they should never actually be used. */
   struct SpecialOpSettings
   {
-    bool newGrid = false;
-    bool newGridBand = false;
+    bool newGrid = true;
+    bool newGridBand = true;
     bool newGridBandMode = false;
     /* CE3TSK: new call and its band variants, forced on / on / off like the grid triple: a
        station counts once per band in WW Digi whatever the mode, so "new call on this band"
@@ -920,23 +941,25 @@ private:
     bool newCall = true;
     bool newCallBand = true;
     bool newCallBandMode = true;
-    bool autolog = false;
-    bool clearDX = false;
-    bool distanceInComments = false;
-    bool promptToLog = true;
+    bool autolog = true;
+    bool clearDX = true;
+    bool distanceInComments = true;
+    bool promptToLog = false;
     bool logAsRTTY = false;
-    bool reportInComments = false;
-    /* CE3TSK: the tiers a contest does not score - DXCC, both zones and prefix. Forced off
-       so their colors cannot contradict the ranking, where contest points outrank them. */
+    bool reportInComments = true;
+    /* CE3TSK: the tiers a contest does not score - DXCC, both zones and prefix. A contest
+       forces them off so their colors cannot contradict the ranking, where contest points
+       outrank them; the forcing lives in the dialog, so these initialisers stay at the stock
+       defaults like every other field here. */
     bool newCQZ = false;
     bool newCQZBand = false;
     bool newCQZBandMode = false;
     bool newITUZ = false;
     bool newITUZBand = false;
     bool newITUZBandMode = false;
-    bool newDXCC = false;
-    bool newDXCCBand = false;
-    bool newDXCCBandMode = false;
+    bool newDXCC = true;
+    bool newDXCCBand = true;
+    bool newDXCCBandMode = true;
     bool newPx = false;
     bool newPxBand = false;
     bool newPxBandMode = false;
@@ -1042,8 +1065,8 @@ private:
 
 
 // delegate to implementation class
-Configuration::Configuration (QSettings * settings, QWidget * parent)
-  : m_ {this, settings, parent}
+Configuration::Configuration (QNetworkAccessManager * network_manager, QSettings * settings, QWidget * parent)
+  : m_ {this, network_manager, settings, parent}
 {
 }
 
@@ -1184,6 +1207,7 @@ bool Configuration::insert_blank () const {return m_->insert_blank_;}
 bool Configuration::useDarkStyle () const {return m_->useDarkStyle_;}
 bool Configuration::countryName () const {return m_->countryName_;}
 bool Configuration::countryPrefix () const {return m_->countryPrefix_;}
+bool Configuration::countryNameTranslated () const {return m_->countryNameTranslated_;}
 bool Configuration::callNotif () const {return m_->callNotif_;}
 bool Configuration::gridNotif () const {return m_->gridNotif_;}
 bool Configuration::otherMessagesMarker () const {return m_->otherMessagesMarker_;}
@@ -1658,13 +1682,14 @@ namespace
   }
 }
 
-Configuration::impl::impl (Configuration * self, QSettings * settings, QWidget * parent)
+Configuration::impl::impl (Configuration * self, QNetworkAccessManager * network_manager, QSettings * settings, QWidget * parent)
   : QDialog {parent}
   , self_ {self}
   , ui_ {new Ui::configuration_dialog}
   , settings_ {settings}
   , doc_dir_ {doc_path ()}
   , data_dir_ {data_path ()}
+  , network_manager_ {network_manager}
   , restart_sound_input_device_ {false}
   , restart_sound_output_device_ {false}
   , restart_tci_device_ {false}
@@ -1802,6 +1827,21 @@ Configuration::impl::impl (Configuration * self, QSettings * settings, QWidget *
   // Dependent checkboxes 
   ui_->countryPrefix_check_box->setChecked(countryName_ && countryPrefix_);
   ui_->countryPrefix_check_box->setEnabled(countryName_);
+  ui_->countryNameTranslated_check_box->setChecked(countryName_ && countryNameTranslated_);
+  ui_->countryNameTranslated_check_box->setEnabled(countryName_);
+
+  // CE3TSK: data file updates - exactly one of complete() or error() arrives per download
+  for (FileDownload * download : {&cty_download_, &lotw_download_})
+    {
+      connect (download, &FileDownload::complete, this, [this] (QString const&) {
+          update_data_file_labels ();
+          Q_EMIT self_->data_files_updated ();
+        });
+      connect (download, &FileDownload::error, this, [this, download] (FileDownload::Failure failure, QString const& detail) {
+          update_data_file_labels ();
+          data_file_download_failed (download == &cty_download_ ? cty_file_name : lotw_file_name, failure, detail);
+        });
+    }
   ui_->gridNotif_check_box->setChecked(callNotif_ && gridNotif_);
   ui_->gridNotif_check_box->setEnabled(callNotif_);
   ui_->blueMarker_check_box->setChecked(redMarker_ && blueMarker_);
@@ -2081,6 +2121,8 @@ Configuration::impl::~impl ()
 
 void Configuration::impl::initialize_models ()
 {
+  update_data_file_labels ();   // CE3TSK
+
   //
   // setup PTT port combo box drop down content
   //
@@ -2407,6 +2449,7 @@ Radio::convert_dark("#fafbfe",useDarkStyle_),Radio::convert_dark("#dcdef1",useDa
   ui_->useDarkStyle_check_box->setChecked (useDarkStyle_);
   ui_->countryName_check_box->setChecked (countryName_);
   ui_->countryPrefix_check_box->setChecked (countryName_ && countryPrefix_);
+  ui_->countryNameTranslated_check_box->setChecked (countryName_ && countryNameTranslated_);
   ui_->callNotif_check_box->setChecked (callNotif_);
   ui_->gridNotif_check_box->setChecked (gridNotif_ && callNotif_);
   ui_->otherMessagesMarker_check_box->setChecked (otherMessagesMarker_);
@@ -2667,18 +2710,18 @@ void Configuration::impl::read_settings ()
   aggressive_ = settings_->value ("Aggressive", 1).toInt (); if(!(aggressive_>=1 && aggressive_<=5)) aggressive_=1;
   harmonicsdepth_ = settings_->value ("HarmonicsDecodingDepth", 0).toInt (); if(!(harmonicsdepth_>=0 && harmonicsdepth_<=4)) harmonicsdepth_=0;
   ntopfreq65_ = settings_->value ("TopFrequencyJT65", 2700).toInt (); if(!(ntopfreq65_>=100 && ntopfreq65_<=5000)) ntopfreq65_=2700;
-  nAnswerCQCounter_ = settings_->value ("SeqAnswerCQCounterValue", 2).toInt (); if(!(nAnswerCQCounter_>=1 && nAnswerCQCounter_<=21)) nAnswerCQCounter_=2;
-  nAnswerInCallCounter_ = settings_->value ("SeqAnswerInCallCounterValue", 3).toInt (); if(!(nAnswerInCallCounter_>=1 && nAnswerInCallCounter_<=21)) nAnswerInCallCounter_=2;
-  nSentRReportCounter_ = settings_->value ("SeqSentRReportCounterValue", 5).toInt (); if(!(nSentRReportCounter_>=1 && nSentRReportCounter_<=21)) nSentRReportCounter_=3;
-  nSentRR7373Counter_ = settings_->value ("SeqSentRR7373CounterValue", 4).toInt (); if(!(nSentRR7373Counter_>=1 && nSentRR7373Counter_<=21)) nSentRR7373Counter_=2;
+  nAnswerCQCounter_ = settings_->value ("SeqAnswerCQCounterValue", 4).toInt (); if(!(nAnswerCQCounter_>=1 && nAnswerCQCounter_<=21)) nAnswerCQCounter_=4;
+  nAnswerInCallCounter_ = settings_->value ("SeqAnswerInCallCounterValue", 4).toInt (); if(!(nAnswerInCallCounter_>=1 && nAnswerInCallCounter_<=21)) nAnswerInCallCounter_=4;
+  nSentRReportCounter_ = settings_->value ("SeqSentRReportCounterValue", 5).toInt (); if(!(nSentRReportCounter_>=1 && nSentRReportCounter_<=21)) nSentRReportCounter_=5;
+  nSentRR7373Counter_ = settings_->value ("SeqSentRR7373CounterValue", 4).toInt (); if(!(nSentRR7373Counter_>=1 && nSentRR7373Counter_<=21)) nSentRR7373Counter_=4;
   nsingdecatt_ = settings_->value ("nSingleDecodeAttempts", 1).toInt (); if(!(nsingdecatt_>=1 && nsingdecatt_<=3)) nsingdecatt_=1;
   fmaskact_ = settings_->value ("FMaskDecoding", false).toBool ();
-  answerCQCount_ = settings_->value ("SeqAnswerCQCount", false).toBool ();
-  answerInCallCount_ = settings_->value ("SeqAnswerInCallCount", false).toBool ();
-  sentRReportCount_ = settings_->value ("SeqSentRReportCount", false).toBool ();
-  sentRR7373Count_ = settings_->value ("SeqSentRR7373Count", false).toBool ();
+  answerCQCount_ = settings_->value ("SeqAnswerCQCount", true).toBool ();
+  answerInCallCount_ = settings_->value ("SeqAnswerInCallCount", true).toBool ();
+  sentRReportCount_ = settings_->value ("SeqSentRReportCount", true).toBool ();
+  sentRR7373Count_ = settings_->value ("SeqSentRR7373Count", true).toBool ();
   strictdirCQ_ = settings_->value ("StrictDirectionalCQ", false).toBool ();
-  halttxreplyother_ = settings_->value ("SeqHaltTxReplyOther", true).toBool ();
+  halttxreplyother_ = settings_->value ("SeqHaltTxReplyOther", false).toBool ();
 
   if(settings_->value ("HideFreeMsgs").toString()=="false" || settings_->value ("HideFreeMsgs").toString()=="true")
     hidefree_ = settings_->value ("HideFreeMsgs").toBool ();
@@ -2808,9 +2851,13 @@ void Configuration::impl::read_settings ()
   else monitor_off_at_startup_ = false;
 
   monitor_last_used_ = settings_->value ("MonitorLastUsed", false).toBool ();
-  spot_to_psk_reporter_ = settings_->value ("PSKReporter", false).toBool ();
+  spot_to_psk_reporter_ = settings_->value ("PSKReporter", true).toBool (); /* CE3TSK: on unless the user turned it off */
   spot_to_dxsummit_ = settings_->value ("AllowSpotsDXSummit", false).toBool ();
-  prevent_spotting_false_ = settings_->value ("preventFalseUDPspots", true).toBool ();
+  /* CE3TSK: off by the operator's decision 2026-09-16 - their own station has run it off for
+     years. It does mean a fresh install forwards decodes flagged isWrong () to UDP consumers such
+     as JTAlert, which may re-spot them; the fork's false-decode report gate (irpt>105) is what
+     keeps the worst of them out of reports. */
+  prevent_spotting_false_ = settings_->value ("preventFalseUDPspots", false).toBool ();
 
   if(settings_->value ("ApplyFiltersToUDPmessages").toString()=="false" || settings_->value ("ApplyFiltersToUDPmessages").toString()=="true")
     filterUDP_ = settings_->value ("ApplyFiltersToUDPmessages").toBool ();
@@ -2884,6 +2931,22 @@ void Configuration::impl::read_settings ()
       if (v.isValid ())
         {
           frequencies_.frequency_list (v.value<FrequencyList_v2::FrequencyItems> ());
+          /* CE3TSK: the table is stored whole, so FT2's default rows - added to the shipped list in
+             2026-09 - never reach a profile that already has a table of its own, and the mode would
+             have no working frequency anywhere. Seed them once. The flag is what makes it once: an
+             operator who deletes the rows keeps them deleted. */
+          if (!settings_->value ("FT2FrequenciesSeeded", false).toBool ())
+            {
+              auto list = frequencies_.frequency_list ();
+              bool seen {false};
+              for (auto const& item : list) { if (item.mode_ == Modes::FT2) { seen = true; break; } }
+              if (!seen)
+                {
+                  for (auto const& row : FrequencyList_v2::default_rows (Modes::FT2)) list << row;
+                  frequencies_.frequency_list (list);
+                }
+              settings_->setValue ("FT2FrequenciesSeeded", true);
+            }
         }
       else
         {
@@ -2918,8 +2981,8 @@ void Configuration::impl::read_settings ()
   stations_.station_list (settings_->value ("stations").value<StationList::Stations> ());
 
   log_as_RTTY_ = settings_->value ("toRTTY", false).toBool ();
-  report_in_comments_ = settings_->value("dBtoComments", false).toBool ();
-  distance_in_comments_ = settings_->value("distanceToComments", false).toBool ();
+  report_in_comments_ = settings_->value("dBtoComments", true).toBool ();
+  distance_in_comments_ = settings_->value("distanceToComments", true).toBool ();
   rig_params_.rig_name = settings_->value ("Rig", TransceiverFactory::basic_transceiver_name_).toString ();
   rig_is_dummy_ = TransceiverFactory::basic_transceiver_name_ == rig_params_.rig_name;
   is_tci_ = rig_params_.rig_name.startsWith("TCI Cli");
@@ -2939,14 +3002,15 @@ void Configuration::impl::read_settings ()
   rig_params_.audio_source = settings_->value ("TXAudioSource", QVariant::fromValue (TransceiverFactory::TX_audio_source_front)).value<TransceiverFactory::TXAudioSource> ();
   rig_params_.ptt_port = settings_->value ("PTTport").toString ();
   data_mode_ = settings_->value ("DataMode", QVariant::fromValue (data_mode_none)).value<Configuration::DataMode> ();
-  prompt_to_log_ = settings_->value ("PromptToLog", true).toBool ();
-  autolog_ = settings_->value ("AutoQSOLogging", false).toBool ();
+  prompt_to_log_ = settings_->value ("PromptToLog", false).toBool ();   /* CE3TSK: mutually exclusive with AutoQSOLogging, which now defaults on */
+  autolog_ = settings_->value ("AutoQSOLogging", true).toBool ();
   content_ = settings_->value ("Content", "AVI,CMD,GIF,HTML,HYBRID,IMAGE,JOINT,JPG,MP4,PHOTO").toString ();
   countries_ = settings_->value ("CountryFilterList", "").toString ();
   callsigns_ = settings_->value ("CallsignFilterList", "").toString ();
-  insert_blank_ = settings_->value ("InsertBlank", false).toBool ();
+  insert_blank_ = settings_->value ("InsertBlank", true).toBool ();
   countryName_ = settings_->value ("countryName", true).toBool ();
   countryPrefix_ = settings_->value ("countryPrefix", false).toBool ();
+  countryNameTranslated_ = settings_->value ("countryNameTranslated", false).toBool ();
 
   if(settings_->value ("callsignLogFiltering").toString()=="false" || settings_->value ("callsignLogFiltering").toString()=="true")
     callNotif_ = settings_->value ("callsignLogFiltering").toBool ();
@@ -2958,8 +3022,8 @@ void Configuration::impl::read_settings ()
 
   next_txtColor_ = txtColor_ = settings_->value ("txtColor", false).toBool ();
   next_workedColor_ = workedColor_ = settings_->value ("workedColor", false).toBool ();
-  next_workedStriked_ = workedStriked_ = settings_->value ("workedStriked", true).toBool ();
-  next_workedUnderlined_ = workedUnderlined_ = settings_->value ("workedUnderlined", false).toBool ();
+  next_workedStriked_ = workedStriked_ = settings_->value ("workedStriked", false).toBool ();
+  next_workedUnderlined_ = workedUnderlined_ = settings_->value ("workedUnderlined", true).toBool ();
 
   if(settings_->value ("workedDontShow").toString()=="false" || settings_->value ("workedDontShow").toString()=="true")
     next_workedDontShow_ = workedDontShow_ = settings_->value ("workedDontShow").toBool ();
@@ -2974,8 +3038,8 @@ void Configuration::impl::read_settings ()
   next_newDXCC_ = newDXCC_ = settings_->value ("newDXCC", true).toBool ();
   next_newDXCCBand_ = newDXCCBand_ = settings_->value ("newDXCCBand", true).toBool ();
   next_newDXCCBandMode_ = newDXCCBandMode_ = settings_->value ("newDXCCBandMode", true).toBool ();
-  next_newGrid_ = newGrid_ = settings_->value ("newGrid", false).toBool ();
-  next_newGridBand_ = newGridBand_ = settings_->value ("newGridBand", false).toBool ();
+  next_newGrid_ = newGrid_ = settings_->value ("newGrid", true).toBool ();
+  next_newGridBand_ = newGridBand_ = settings_->value ("newGridBand", true).toBool ();
   next_newGridBandMode_ = newGridBandMode_ = settings_->value ("newGridBandMode", false).toBool ();
   /* CE3TSK: special operating activity. Migrated once from the WWDigiContest boolean that
      used to live under [Common] with the Misc menu item, so an existing contest setting is
@@ -3007,20 +3071,20 @@ void Configuration::impl::read_settings ()
   next_newCallBandMode_ = newCallBandMode_ = settings_->value ("newCallBandMode", true).toBool ();
   next_newPotential_ = newPotential_ = settings_->value ("newPotential", false).toBool ();
   otherMessagesMarker_ = settings_->value ("OtherStandardMessagesMarker", true).toBool () && !newPotential_;
-  RR73Marker_= settings_->value ("73RR73Marker", true).toBool ();
+  RR73Marker_= settings_->value ("73RR73Marker", true).toBool ();   /* CE3TSK: it also sets QsoHistory::RFIN, the only way auto sequence sees a station that has just signed off */
   on_RR73_marker_check_box_clicked(RR73Marker_);
   redMarker_ = settings_->value ("redMarker", true).toBool ();
   blueMarker_ = settings_->value ("blueMarker", false).toBool ();
   hidehintMarker_ = settings_->value ("hidehintMarker", false).toBool ();
-  clear_DX_ = settings_->value ("ClearCallGrid", false).toBool ();
+  clear_DX_ = settings_->value ("ClearCallGrid", true).toBool ();
 
-  clear_DX_exit_ = settings_->value ("ClearCallGridExit", false).toBool ();
+  clear_DX_exit_ = settings_->value ("ClearCallGridExit", true).toBool ();
   miles_ = settings_->value ("Miles", false).toBool ();
   scroll_ = settings_->value ("Scroll", false).toBool ();
   watchdog_ = settings_->value ("TxWatchdogTimer", 6).toInt (); if(!(watchdog_>=0 && watchdog_<=999)) watchdog_=6;
   tunetimer_ = settings_->value ("TuneTimer", 30).toInt (); if(!(tunetimer_>=0 && tunetimer_<=300)) tunetimer_=30;
   TX_messages_ = settings_->value ("Tx2QSO", true).toBool ();
-  hide_TX_messages_ = settings_->value ("HideTxMessages", true).toBool ();
+  hide_TX_messages_ = settings_->value ("HideTxMessages", false).toBool ();
   decode_at_52s_ = settings_->value("Decode52",false).toBool ();
   beepOnMyCall_ = settings_->value("BeepOnMyCall", false).toBool();
   beepOnNewCQZ_ = settings_->value("BeepOnNewCQZ", false).toBool();
@@ -3077,11 +3141,11 @@ void Configuration::impl::read_settings ()
   udp2_server_port_ = settings_->value ("UDP2ServerPort", 2333).toUInt ();
   tcp_server_name_ = settings_->value ("TCPServer", "127.0.0.1").toString ();
   tcp_server_port_ = settings_->value ("TCPServerPort", 52001).toUInt ();
-  accept_udp_requests_ = settings_->value ("AcceptUDPRequests", false).toBool ();
+  accept_udp_requests_ = settings_->value ("AcceptUDPRequests", false).toBool ();   /* CE3TSK: off until the operator asks - a UDP request can key the transmitter */
 
   if(settings_->value ("EnableUDP1adifSending").toString()=="false" || settings_->value ("EnableUDP1adifSending").toString()=="true")
     enable_udp1_adif_sending_ = settings_->value("EnableUDP1adifSending").toBool ();
-  else enable_udp1_adif_sending_ = false;
+  else enable_udp1_adif_sending_ = true;
   if(settings_->value ("EnableUDP2adifBroadcast").toString()=="false" || settings_->value ("EnableUDP2adifBroadcast").toString()=="true")
     enable_udp2_broadcast_ = settings_->value("EnableUDP2adifBroadcast").toBool ();
   else enable_udp2_broadcast_ = false;
@@ -3098,11 +3162,11 @@ void Configuration::impl::read_settings ()
 
   if(settings_->value ("pwrBandTxMemory").toString()=="false" || settings_->value ("pwrBandTxMemory").toString()=="true")
     pwrBandTxMemory_ = settings_->value("pwrBandTxMemory").toBool ();
-  else pwrBandTxMemory_ = false;
+  else pwrBandTxMemory_ = true;
 
   if(settings_->value ("pwrBandTuneMemory").toString()=="false" || settings_->value ("pwrBandTuneMemory").toString()=="true")
     pwrBandTuneMemory_ = settings_->value("pwrBandTuneMemory").toBool ();
-  else pwrBandTuneMemory_ = false;
+  else pwrBandTuneMemory_ = true;
 }
 
 void Configuration::add_callsign_hideFilter (QString basecall)
@@ -3289,6 +3353,7 @@ void Configuration::impl::write_settings ()
   settings_->setValue ("UseDarkStyle", useDarkStyle_);
   settings_->setValue ("countryName", countryName_);
   settings_->setValue ("countryPrefix", countryPrefix_);
+  settings_->setValue ("countryNameTranslated", countryNameTranslated_);
   settings_->setValue ("callsignLogFiltering", callNotif_);
   settings_->setValue ("gridLogFiltering", gridNotif_);
   settings_->setValue ("OtherStandardMessagesMarker", otherMessagesMarker_);
@@ -3948,6 +4013,7 @@ void Configuration::impl::accept ()
   tunetimer_= ui_->tune_timer_spin_box->value ();
   countryName_ = ui_->countryName_check_box->isChecked ();
   countryPrefix_ = ui_->countryPrefix_check_box->isChecked ();
+  countryNameTranslated_ = ui_->countryNameTranslated_check_box->isChecked ();
   callNotif_ = ui_->callNotif_check_box->isChecked ();
   gridNotif_ = ui_->gridNotif_check_box->isChecked ();
   otherMessagesMarker_ = ui_->otherMessagesMarker_check_box->isChecked ();
@@ -4239,10 +4305,76 @@ void Configuration::impl::on_font_push_button_clicked ()
   next_font_ = QFontDialog::getFont (0, next_font_, this);
 }
 
+// CE3TSK: data file updates
+void Configuration::impl::on_cty_download_push_button_clicked (bool)
+{
+  start_data_file_download (cty_download_, cty_url, cty_file_name, &CountryDat::ctyVersion,
+                            tr ("The downloaded file is not a cty.dat file."));
+}
+
+void Configuration::impl::on_lotw_download_push_button_clicked (bool)
+{
+  start_data_file_download (lotw_download_, lotw_url, lotw_file_name, &CountryDat::lotwVersion,
+                            tr ("The downloaded file is not a LoTW user activity file."));
+}
+
+void Configuration::impl::start_data_file_download (FileDownload& download, char const * url, char const * file_name,
+                                                    QDate (* version_of) (QByteArray const&), QString const& not_that_file)
+{
+  // the directory LogBook::init reads its copies from
+  QDir const data_dir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)};
+  download.configure (network_manager_, url, data_dir.absoluteFilePath (file_name),
+                      "JTDX_contest/" + QCoreApplication::applicationVersion (),
+                      [version_of, not_that_file] (QByteArray const& content) {
+                        return version_of (content).isValid () ? QString {} : not_that_file;
+                      });
+  download.start_download ();
+  update_data_file_labels ();
+}
+
+void Configuration::impl::data_file_download_failed (char const * file_name, FileDownload::Failure failure, QString const& detail)
+{
+  QString reason;
+  switch (failure)
+    {
+    case FileDownload::Failure::NoSsl: reason = tr ("SSL/TLS support is not installed, so %1 cannot be fetched.").arg (detail); break;
+    case FileDownload::Failure::HttpStatus: reason = tr ("The server answered with HTTP status %1.").arg (detail); break;
+    case FileDownload::Failure::TooLarge: reason = tr ("The download was stopped at %1 MB.").arg (detail); break;
+    case FileDownload::Failure::Rejected: reason = detail; break;
+    case FileDownload::Failure::Write: reason = tr ("The file could not be saved: %1").arg (detail); break;
+    case FileDownload::Failure::Network: reason = tr ("Network error: %1").arg (detail); break;
+    }
+  JTDXMessageBox::warning_message (this, tr ("Download of %1 failed").arg (file_name), reason,
+                                   tr ("The copy in use has not been changed."));
+}
+
+void Configuration::impl::update_data_file_labels ()
+{
+  QDir const data_dir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)};
+  auto const show = [this, &data_dir] (QLabel * label, QPushButton * button, FileDownload const& download,
+                                       char const * file_name, QDate (* version_of) (QByteArray const&)) {
+      button->setEnabled (!download.running ());
+      if (download.running ())
+        {
+          label->setText (tr ("downloading..."));
+          return;
+        }
+      QDate version;
+      auto const path = CountryDat::fileToUse (data_dir, file_name, version_of, &version);
+      auto const date = version.isValid () ? version.toString (Qt::ISODate) : tr ("version unknown");
+      label->setText (path.startsWith (":/") ? tr ("%1, bundled with this release").arg (date)
+                                             : tr ("%1, downloaded").arg (date));
+    };
+  show (ui_->cty_file_status_label, ui_->cty_download_push_button, cty_download_, cty_file_name, &CountryDat::ctyVersion);
+  show (ui_->lotw_file_status_label, ui_->lotw_download_push_button, lotw_download_, lotw_file_name, &CountryDat::lotwVersion);
+}
+
 void Configuration::impl::on_countryName_check_box_clicked(bool checked)
 {
   ui_->countryPrefix_check_box->setChecked(checked && countryPrefix_);
   ui_->countryPrefix_check_box->setEnabled(checked);
+  ui_->countryNameTranslated_check_box->setChecked(checked && countryNameTranslated_);
+  ui_->countryNameTranslated_check_box->setEnabled(checked);
 }
 
 void Configuration::impl::on_callNotif_check_box_clicked(bool checked)
@@ -5419,9 +5551,10 @@ bool Configuration::recommended_colors_offer_pending () const
 void Configuration::accept_recommended_colors ()
 {
   m_->apply_recommended_colors ();
-  m_->useDarkStyle_ = true;                              // the colours are tuned for it
-  m_->ui_->useDarkStyle_check_box->setChecked (true);
   m_->recommendedColorsOffered_ = true;
+  /* the colours are tuned for the dark style. Switch it the way View > Use dark style does, so the
+     style sheet is loaded too - setting the flag alone left the window light until a restart. */
+  set_dark_style (true);
   m_->write_settings ();
 }
 
@@ -5429,6 +5562,20 @@ void Configuration::decline_recommended_colors ()
 {
   m_->recommendedColorsOffered_ = true;                  // asked once, never again
   m_->write_settings ();
+}
+
+void Configuration::set_dark_style (bool dark)
+{
+  if (dark == m_->useDarkStyle_) return;
+  m_->useDarkStyle_ = dark;
+  m_->ui_->useDarkStyle_check_box->setChecked (dark);
+  m_->set_application_font (m_->font_);                  // reloads the style sheet, may refuse
+  m_->write_settings ();
+}
+
+void Configuration::fit_widget_size_limits ()
+{
+  m_->fit_size_limits ();
 }
 
 void Configuration::impl::on_pbDefaultColors_clicked()
@@ -7345,6 +7492,12 @@ void Configuration::impl::set_application_font (QFont const& font)
       }
     }
   qApp->setStyleSheet (ss + "* {" + font_as_stylesheet (font) + '}');
+  fit_size_limits ();
+}
+
+// CE3TSK: see the comment inside; also run once by MainWindow after its widgets and the Wide Graph exist
+void Configuration::impl::fit_size_limits ()
+{
   for (auto& widget : qApp->topLevelWidgets ())
     {
       /* CE3TSK: the .ui files pin ~30 widgets with hard pixel maximumSize caps chosen for the

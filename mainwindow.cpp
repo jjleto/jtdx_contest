@@ -52,6 +52,7 @@
 #include "contestreply.h"
 #include "logfields.h"   // CE3TSK: what a log entry takes when the QSO skipped a step   /* CE3TSK: contest-mode rejection of signal-report messages */
 #include "decodelabel.h"   // CE3TSK
+#include "modetiming.h"   // CE3TSK: the per-mode timing constants
 #include <QPainter>
 #include <functional>   // CE3TSK P13: the recursive menu hook
 #include <QThread>                  /* CE3TSK: 16 bit wav expansion */
@@ -175,7 +176,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   ui(new Ui::MainWindow),
 //  m_olek {false},
 //  m_olek2 {false},
-  m_config {settings, this},
+  m_config {network_manager, settings, this},
 
   m_WSPR_band_hopping {settings, &m_config, this},
   m_WSPR_tx_next {false},
@@ -324,8 +325,11 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_bHisCallStd {true},
   m_callNotif {false},
   m_gridNotif {false},
+  m_countryNameTranslated {false},
   m_qsoLogged {false},
   m_logInitNeeded {false},
+  m_dataFilesChanged {false},
+  m_dxCallHidden {false},
   m_wantedchkd {false},
   m_menus {true},
   m_wasSkipTx1 {false},
@@ -465,6 +469,12 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_manual {network_manager}
 {
   ui->setupUi(this);
+  m_bandButtonsTimer.setSingleShot (true);   // CE3TSK: View > Band buttons, see scheduleBandButtons ()
+  m_bandButtonsTimer.setInterval (0);
+  connect (&m_bandButtonsTimer, &QTimer::timeout, this, &MainWindow::rebuildBandButtons);
+  m_dialWheelTimer.setSingleShot (true);   // CE3TSK: dial wheel tuning, see dialFrequencyWheel ()
+  m_dialWheelTimer.setInterval (200);
+  connect (&m_dialWheelTimer, &QTimer::timeout, this, &MainWindow::applyDialWheel);
   wrap_tooltips (this);   /* CE3TSK: Qt does not word-wrap a plain tooltip, see tooltip_wrap.hpp */
   m_config.set_jtdxtime (m_jtdxtime);
   ui->decodedTextBrowser->setConfiguration (&m_config);
@@ -624,6 +634,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
 
   QActionGroup* modeGroup = new QActionGroup(this);
   ui->actionFT4->setActionGroup(modeGroup);
+  ui->actionFT2->setActionGroup(modeGroup);   // CE3TSK
   ui->actionFT8->setActionGroup(modeGroup);
   ui->actionJT65->setActionGroup(modeGroup);
   ui->actionJT9_JT65->setActionGroup(modeGroup);
@@ -703,6 +714,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   ui->actionFT8PresetPipelineLight->setActionGroup(FT8PresetGroup);
   markRecommendedPresets();   // CE3TSK
   markFT4Presets();   // CE3TSK item 67
+  markFT2Presets();   // CE3TSK step 5: the same marks on FT2's tiers
   ui->actionFT8PresetPipeline->setActionGroup(FT8PresetGroup);
   ui->actionFT8PresetPipelineFull->setActionGroup(FT8PresetGroup);
   ui->actionFT8PresetPipelineRun->setActionGroup(FT8PresetGroup);
@@ -764,6 +776,15 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
     ui->menuBar->setCornerWidget (kofi, Qt::TopRightCorner);
   }
   connect(ui->menuFT4_decoding, &QMenu::aboutToShow, this, &MainWindow::refreshFT4Preset);   // CE3TSK: same for FT4
+  connect(ui->menuFT2_decoding, &QMenu::aboutToShow, this, &MainWindow::refreshFT2Preset);   // CE3TSK step 5: and for FT2
+  QActionGroup* FT2PresetGroup = new QActionGroup(this);
+  for (auto a : {ui->actionFT2PresetFast, ui->actionFT2PresetDefault,
+                 ui->actionFT2PresetRecommended, ui->actionFT2PresetMaxEffort}) a->setActionGroup(FT2PresetGroup);
+  QActionGroup* FT2EnsembleGroup = new QActionGroup(this);
+  for (auto a : {ui->actionFT2EnsembleOff, ui->actionFT2EnsembleAuto, ui->actionFT2EnsembleBudget}) a->setActionGroup(FT2EnsembleGroup);
+  QActionGroup* FT2BgEnsembleGroup = new QActionGroup(this);
+  for (auto a : {ui->actionFT2BgEnsembleOff, ui->actionFT2BgEnsemble3, ui->actionFT2BgEnsemble6,
+                 ui->actionFT2BgEnsembleAuto}) a->setActionGroup(FT2BgEnsembleGroup);
   QActionGroup* FT4PresetGroup = new QActionGroup(this);
   for (auto a : {ui->actionFT4PresetFast, ui->actionFT4PresetDefault, ui->actionFT4PresetBestPower,
                  ui->actionFT4PresetRecommended, ui->actionFT4PresetMaxDecodes, ui->actionFT4PresetMaxEffort}) a->setActionGroup(FT4PresetGroup);
@@ -776,7 +797,17 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
     };
     hook(ui->menuFT8_RX); hook(ui->menuFT8_TX); hook(ui->menuFT8_threads);
     hook(ui->menuFT4_RX); hook(ui->menuFT4_TX);   // item 73: the lamp reads the FT4 preset in FT4 mode
+    /* CE3TSK step 5: and FT2's, or the lamp never notices a control changing under it - the tier
+       would still read "Preset R" after the operator moved an RX member off it, and would not come
+       back when they moved it back. Every action in these two submenus feeds the same refresh. */
+    hook(ui->menuFT2_RX); hook(ui->menuFT2_TX);
     connect(ui->swlButton, &QPushButton::clicked, this, &MainWindow::refreshDecodePreset);
+  // CE3TSK: dragging the bar is the one thing that changes the share the panes keep
+  /* CE3TSK: the drag is read AFTER Qt has applied it. Reading sizes() inside splitterMoved gives the
+     positions from before the move, so the share was set back to the old one and the next layout
+     snapped the bar home - the handle could not be dragged at all, which is how this was found. */
+  connect(ui->splitter, &QSplitter::splitterMoved, this,
+          [this] (int, int) { if (!m_splitApplying) QTimer::singleShot (0, this, [this] { rememberSplitRatio (); }); });
   }
   QActionGroup* FT8DecoderSensitivityGroup = new QActionGroup(this);
   ui->actionFT8SensMin->setActionGroup(FT8DecoderSensitivityGroup);
@@ -949,6 +980,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   connect (&m_config, &Configuration::transceiver_failure, this, &MainWindow::handle_transceiver_failure);
   connect (&m_config, &Configuration::udp_server_changed, m_messageClient, &MessageClient::set_server);
   connect (&m_config, &Configuration::udp_server_port_changed, m_messageClient, &MessageClient::set_server_port);
+  connect (&m_config, &Configuration::data_files_updated, this, &MainWindow::dataFilesUpdated);   // CE3TSK
 
 
   // set up message text validators
@@ -1035,6 +1067,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   ui->labDist->setStyleSheet("border: 0px;");
 
   m_useDarkStyle = m_config.useDarkStyle(); setDecodeMenuColours();
+  ui->actionUse_dark_style->setChecked (m_useDarkStyle);   // CE3TSK
   readSettings();		         //Restore user's setup params
   refreshDecodePreset();   // P13: the preset lamp from the restored controls
 
@@ -1176,6 +1209,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   
   if(m_mode=="FT8") on_actionFT8_triggered();
   else if(m_mode=="FT4") on_actionFT4_triggered();
+  else if(m_mode=="FT2") on_actionFT2_triggered();   // CE3TSK
   else if(m_mode=="JT9+JT65") on_actionJT9_JT65_triggered();
   else if(m_mode=="JT9") on_actionJT9_triggered();
   else if(m_mode=="JT65") on_actionJT65_triggered();
@@ -1266,6 +1300,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   genft8_(message,&i3,&n3,&ntxhash,msgsent,const_cast<char *> (ft8msgbits),const_cast<int *> (itone),37,37);
 
   m_bHisCallStd=stdCall(m_hisCall); styleChanged();
+  m_config.fit_widget_size_limits ();   // CE3TSK: the pass the font setting ran before these widgets existed
   QTimer::singleShot (0, this, &MainWindow::offerRecommendedColors);   // CE3TSK: the one-time colour offer
   // this must be the last statement of constructor
   if (!m_valid) throw std::runtime_error {"Fatal initialization exception"};
@@ -1297,6 +1332,7 @@ void MainWindow::writeSettings()
 {
   m_settings->beginGroup("MainWindow");
   m_settings->setValue("geometry",saveGeometry ());
+  m_settings->setValue("geometryMinHint",minimumSizeHint ());   // CE3TSK: see restoreMainGeometry ()
   m_settings->setValue("state",saveState ());
   m_settings->setValue("vertSplitter",ui->splitter->saveState());
   m_settings->setValue("MRUdir",m_path);
@@ -1366,6 +1402,27 @@ void MainWindow::writeSettings()
   m_settings->setValue("FT4BgQSORXfreqSensitivity",m_ft4BgRXfSens);
   m_settings->setValue("FT4EnsembleEffort",m_ft4Ensemble);
   m_settings->setValue("FT4RXBudget",m_ft4RXBudget);   // CE3TSK item 80: tenths
+  /* CE3TSK step 5: FT2's own values, one key per field of the recipe. They are written under
+     their own names rather than shared with FT4 because the two modes want different answers:
+     FT2 decodes a 3.75 s period against a 0.58 s deadline. */
+  m_settings->setValue("FT2Depth",m_ft2Recipe.depth);
+  m_settings->setValue("FT2AltPass",m_ft2Recipe.alt);
+  m_settings->setValue("FT2Ensemble",m_ft2Recipe.members);
+  m_settings->setValue("FT2DeepOSD",m_ft2Recipe.deeposd);
+  m_settings->setValue("FT2BgEnsemble",m_ft2Recipe.bg);
+  m_settings->setValue("FT2BgDepth",m_ft2Recipe.bgdepth);
+  m_settings->setValue("FT2BgDeepOSD",m_ft2Recipe.bgdeeposd);
+  m_settings->setValue("FT2BgAltPass",m_ft2Recipe.bgalt);
+  m_settings->setValue("FT2BgTwoSlicings",m_ft2Recipe.bgtwopass);
+  m_settings->setValue("FT2Sensitivity",m_ft2Recipe.sens);
+  m_settings->setValue("FT2BgResidual",m_ft2Recipe.bgresidual);
+  m_settings->setValue("FT2BgSensitivity",m_ft2Recipe.bgsens);
+  m_settings->setValue("FT2TwoSlicings",m_ft2Recipe.twopass);
+  m_settings->setValue("FT2BgEnabled",m_ft2Recipe.bgon);
+  m_settings->setValue("FT2RXfSens",m_ft2Recipe.rxf);
+  m_settings->setValue("FT2BgRXfSens",m_ft2Recipe.bgrxf);
+  m_settings->setValue("FT2RXBudget",m_ft2RXBudget);
+  m_settings->setValue("FT2BgMargin",m_ft2BgMargin);
   m_settings->setValue("FT4BgMargin",m_ft4BgMargin);
   m_settings->setValue("FT4TwoSlicings",m_ft4TwoSlicings);
   m_settings->setValue("FT8EnsembleEffort",m_ft8EnsembleEffort);
@@ -1422,6 +1479,7 @@ void MainWindow::writeSettings()
   m_settings->setValue("73TxDisable",m_disable_TX_on_73);
   m_settings->setValue("ShowMainWindowTooltips",m_showTooltips);
   m_settings->setValue("ColorTxMessageButtons",m_colorTxMsgButtons);
+  m_settings->setValue("BandButtons",ui->actionBand_buttons->isChecked ());   // CE3TSK
   m_settings->setValue("CallsignToClipboard",m_callToClipboard);
   m_settings->setValue("Crossband160mJA",m_crossbandOptionEnabled);
   m_settings->setValue("Crossband160mHL",m_crossbandHLOptionEnabled);
@@ -1435,18 +1493,31 @@ void MainWindow::writeSettings()
   m_settings->endGroup();
 }
 
+/* CE3TSK: restore the saved main window geometry. A saved size can be below what the layout
+   needs for one of two reasons. The operator narrowed the window on purpose: Qt lets it be
+   dragged down to the .ui's 733x422, although the controls start to clip below 829 px at 11 pt.
+   That is the operator's choice, so it reopens exactly as saved. Or it was saved under a smaller
+   font, and then Qt would crush the children further than the operator ever saw: only this grows
+   the window, by as much as the layout's minimum has risen since the save and never past that
+   minimum, so a large window is left alone. Clamping to sizeHint () (971 px wide), and then to
+   minimumSizeHint (), both threw a narrowed width away. See UI_DARK_STYLE.md. */
+void MainWindow::restoreMainGeometry ()
+{
+  restoreGeometry (m_geometry);
+  if (!m_geometryMinHint.isValid ()) return;   // saved before the minimum was recorded: as saved
+  auto const needed = minimumSizeHint ();
+  auto const growth = (needed - m_geometryMinHint).expandedTo (QSize {0, 0});
+  resize (size ().expandedTo ((size () + growth).boundedTo (needed)));
+}
+
 //---------------------------------------------------------- readSettings()
 void MainWindow::readSettings()
 {
   m_settings->beginGroup("MainWindow");
   
   m_geometry = m_settings->value ("geometry",saveGeometry()).toByteArray();
-  restoreGeometry(m_geometry);
-  /* CE3TSK: a geometry saved when the window was dragged small, or with a smaller font,
-     can be below what the layout needs and Qt then crushes the children. sizeHint() is
-     what the layout wants and it tracks the application font; a larger saved size is
-     kept as it is. See UI_DARK_STYLE.md. */
-  resize (size ().expandedTo (sizeHint ()));
+  m_geometryMinHint = m_settings->value ("geometryMinHint").toSize ();   // CE3TSK
+  restoreMainGeometry ();   // CE3TSK
   /* CE3TSK: mainwindow.ui pins ~30 widgets with hard pixel maximumSize caps chosen for the
      original font, so a larger application font cannot grow past them and the text is clipped
      ("Rx 305 Hz" loses the Hz, "GenMsgs" the s). Raise each cap to the widget's own sizeHint,
@@ -1487,7 +1558,7 @@ void MainWindow::readSettings()
      copy is offered beside its source, which is where it belonged before this was remembered */
   m_convertOutPath = m_settings->value("ConvertOutMRUdir","").toString ();   /* CE3TSK */
 
-  m_txFirst = m_settings->value("TxFirst",false).toBool();
+  m_txFirst = m_settings->value("TxFirst",true).toBool();
 
   m_rrr = m_settings->value("RRR/RR73",false).toBool();
   ui->rrrCheckBox->setChecked(m_rrr);
@@ -1513,7 +1584,10 @@ void MainWindow::readSettings()
 
   if(m_settings->contains ("FreeText")) ui->freeTextMsg->setCurrentText (m_settings->value ("FreeText").toString ());
 
-  if(m_settings->value("ShowMenus").toString()=="false") { ui->cbMenus->setChecked(false); on_cbMenus_toggled(false); }
+  /* CE3TSK: the menus show unless the key says otherwise - the default is now written down here
+     rather than implied by cbMenus being checked in the .ui, and a stored 0/1 counts as well as
+     the literal "false" the old string comparison demanded. */
+  if(!m_settings->value("ShowMenus",true).toBool()) { ui->cbMenus->setChecked(false); on_cbMenus_toggled(false); }
   else { ui->cbMenus->setChecked(true); on_cbMenus_toggled(true); }
 
   bool wanted=m_settings->value("ShowWanted",false).toBool(); m_wantedchkd=wanted; ui->cbShowWanted->setChecked(wanted);
@@ -1551,7 +1625,7 @@ void MainWindow::readSettings()
   else if(m_ft8threads==23) ui->actionMT23->setChecked(true);
   else if(m_ft8threads==24) ui->actionMT24->setChecked(true);
 
-  m_acceptUDP=m_settings->value("AcceptUDPReplyMessages",1).toInt(); if(!(m_acceptUDP>=1 && m_acceptUDP<=3)) m_acceptUDP=1;
+  m_acceptUDP=m_settings->value("AcceptUDPReplyMessages",3).toInt(); if(!(m_acceptUDP>=1 && m_acceptUDP<=3)) m_acceptUDP=3;
   if(m_acceptUDP==1) ui->actionAcceptUDPCQ->setChecked(true);
   else if(m_acceptUDP==2) ui->actionAcceptUDPCQ73->setChecked(true);
   else if(m_acceptUDP==3) ui->actionAcceptUDPAny->setChecked(true);
@@ -1566,6 +1640,7 @@ void MainWindow::readSettings()
   if(!m_modeTx.startsWith("FT") && !m_modeTx.startsWith("JT") && m_modeTx!="T10" && !m_modeTx.startsWith ("WSPR")) {
     if(m_mode=="FT8") m_modeTx="FT8";
 	else if(m_mode=="FT4") m_modeTx="FT4";
+    else if(m_mode=="FT2") m_modeTx="FT2";   // CE3TSK
     else if(m_mode=="JT9+JT65") m_modeTx="JT65";
     else if(m_mode=="JT65") m_modeTx="JT65";
     else if(m_mode=="JT9") m_modeTx="JT9";
@@ -1617,15 +1692,15 @@ void MainWindow::readSettings()
   else ui->actionCallPriorityAndSearchCQ->setChecked(m_settings->value("CallPriorityCQ",false).toBool());
 
   ui->actionMaxDistance->setChecked(m_settings->value("MaxDistance",false).toBool());
-  ui->actionAnswerWorkedB4->setChecked(m_settings->value("AnswerWorkedB4",false).toBool());
-  ui->actionCallWorkedB4->setChecked(m_settings->value("CallWorkedB4",false).toBool());
+  ui->actionAnswerWorkedB4->setChecked(m_settings->value("AnswerWorkedB4",true).toBool());
+  ui->actionCallWorkedB4->setChecked(m_settings->value("CallWorkedB4",true).toBool());
   ui->actionCallHigherNewCall->setChecked(m_settings->value("CallHigherNewCall",false).toBool());
   ui->actionSingleShot->setChecked(m_settings->value("SingleShotQSO",false).toBool());
   /* CE3TSK */
   m_uiParkedValid = m_settings->value("ContestUiParked",false).toBool();
   m_settings->remove("ContestUiHound");   /* CE3TSK: no longer parked */
   m_uiParked.autoTx = m_settings->value("ContestUiAutoTx",true).toBool();
-  m_uiParked.skipTx1 = m_settings->value("ContestUiSkipTx1",false).toBool();
+  m_uiParked.skipTx1 = m_settings->value("ContestUiSkipTx1",true).toBool();
   m_uiParked.rrr = m_settings->value("ContestUiRRR",false).toBool();
   m_uiParked.maxDistance = m_settings->value("ContestUiMaxDistance",false).toBool();
   m_uiParked.rprtPriority = m_settings->value("ContestUiRprtPriority",false).toBool();
@@ -1694,6 +1769,38 @@ void MainWindow::readSettings()
   // CE3TSK item 80: FT8's P8 budget and P7 margin, FT4's own values - the RX budget against the 1.36 s reply
   // deadline, the margin the background leaves before the next decode (the max effort preset sets 0.5 s)
   m_ft4RXBudget=m_settings->value("FT4RXBudget",13).toInt(); if(!(m_ft4RXBudget>=5 && m_ft4RXBudget<=600)) m_ft4RXBudget=13;
+  {   // CE3TSK step 5: FT2's own settings, defaulting to its recommended preset on a profile without them
+    FT4Recipe const d = ft2_preset_recipe (FT2Preset::Recommended);
+    m_ft2Recipe.depth=m_settings->value("FT2Depth",d.depth).toInt();
+    if(!(m_ft2Recipe.depth>=1 && m_ft2Recipe.depth<=3)) m_ft2Recipe.depth=d.depth;
+    m_ft2Recipe.alt=m_settings->value("FT2AltPass",d.alt).toBool();
+    m_ft2Recipe.members=m_settings->value("FT2Ensemble",d.members).toInt();
+    if(!valid_ft4_ensemble(m_ft2Recipe.members) && m_ft2Recipe.members!=FT4_ENSEMBLE_AUTO
+       && m_ft2Recipe.members!=FT4_ENSEMBLE_BUDGET) m_ft2Recipe.members=d.members;
+    m_ft2Recipe.deeposd=m_settings->value("FT2DeepOSD",d.deeposd).toBool();
+    m_ft2Recipe.bg=m_settings->value("FT2BgEnsemble",d.bg).toInt();
+    if(!valid_ft4_ensemble(m_ft2Recipe.bg) && m_ft2Recipe.bg!=FT4_ENSEMBLE_AUTO) m_ft2Recipe.bg=d.bg;
+    m_ft2Recipe.bgdepth=m_settings->value("FT2BgDepth",d.bgdepth).toInt();
+    if(!(m_ft2Recipe.bgdepth>=0 && m_ft2Recipe.bgdepth<=3)) m_ft2Recipe.bgdepth=d.bgdepth;
+    m_ft2Recipe.bgdeeposd=m_settings->value("FT2BgDeepOSD",d.bgdeeposd).toBool();
+    m_ft2Recipe.bgalt=m_settings->value("FT2BgAltPass",d.bgalt).toBool();
+    m_ft2Recipe.bgtwopass=m_settings->value("FT2BgTwoSlicings",d.bgtwopass).toBool();
+    m_ft2Recipe.sens=m_settings->value("FT2Sensitivity",d.sens).toInt();
+    if(!(m_ft2Recipe.sens>=0 && m_ft2Recipe.sens<=1)) m_ft2Recipe.sens=d.sens;
+    m_ft2Recipe.bgresidual=m_settings->value("FT2BgResidual",d.bgresidual).toBool();
+    m_ft2Recipe.bgsens=m_settings->value("FT2BgSensitivity",d.bgsens).toInt();
+    if(!(m_ft2Recipe.bgsens>=0 && m_ft2Recipe.bgsens<=1)) m_ft2Recipe.bgsens=d.bgsens;
+    m_ft2Recipe.twopass=m_settings->value("FT2TwoSlicings",d.twopass).toBool();
+    m_ft2Recipe.bgon=m_settings->value("FT2BgEnabled",d.bgon).toBool();
+    m_ft2Recipe.rxf=m_settings->value("FT2RXfSens",d.rxf).toInt();
+    if(!(m_ft2Recipe.rxf>=0 && m_ft2Recipe.rxf<=3)) m_ft2Recipe.rxf=d.rxf;
+    m_ft2Recipe.bgrxf=m_settings->value("FT2BgRXfSens",d.bgrxf).toInt();
+    if(!(m_ft2Recipe.bgrxf>=0 && m_ft2Recipe.bgrxf<=3)) m_ft2Recipe.bgrxf=d.bgrxf;
+    m_ft2RXBudget=m_settings->value("FT2RXBudget",FT2_RX_BUDGET_DEFAULT).toInt();
+    if(!(m_ft2RXBudget>=3 && m_ft2RXBudget<=600)) m_ft2RXBudget=FT2_RX_BUDGET_DEFAULT;
+    m_ft2BgMargin=m_settings->value("FT2BgMargin",FT2_BG_MARGIN_DEFAULT).toInt();
+    if(!(m_ft2BgMargin>=1 && m_ft2BgMargin<=100)) m_ft2BgMargin=FT2_BG_MARGIN_DEFAULT;
+  }
   m_ft4BgMargin=m_settings->value("FT4BgMargin",10).toInt(); if(m_ft4BgMargin<0 || m_ft4BgMargin>100) m_ft4BgMargin=10;
   /* CE3TSK: FT4's second slicing pass defaults ON, where FT8's FT8TwoSlicings defaults off.
      FT4's signals are wide against a slice, so without the offset pass a threaded run loses
@@ -1742,7 +1849,7 @@ void MainWindow::readSettings()
   ui->actionFT8WidebandDXCallSearch->setChecked(m_FT8WideDxCallSearch);
 
   ui->actionBypass_text_filters_on_RX_frequency->setChecked(m_settings->value("BypassRXFreqTextFilters",true).toBool());
-  ui->actionBypass_all_text_filters->setChecked(m_settings->value("BypassAllTextFilters",false).toBool());
+  ui->actionBypass_all_text_filters->setChecked(m_settings->value("BypassAllTextFilters",true).toBool());
   ui->actionEnable_main_window_popup->setChecked(m_settings->value("EnableMainwindowPopup",false).toBool());
   ui->actionAutoErase->setChecked(m_settings->value("AutoErase",false).toBool());
   ui->actionEraseWindowsAtBandChange->setChecked(m_settings->value("EraseWindowsAtBandChange",true).toBool());
@@ -1864,7 +1971,7 @@ void MainWindow::readSettings()
 
   m_lockTxFreq=m_settings->value("LockTxFreq",false).toBool();
 
-  m_skipTx1=m_settings->value("SkipTx1",false).toBool();
+  m_skipTx1=m_settings->value("SkipTx1",true).toBool();
   ui->skipTx1->setChecked(m_skipTx1);
   ui->skipGrid->setChecked(m_skipTx1);
 
@@ -1902,8 +2009,11 @@ void MainWindow::readSettings()
   m_showTooltips=m_settings->value("ShowMainWindowTooltips",true).toBool();
   ui->actionShow_tooltips_main_window->setChecked(m_showTooltips);
 
-  m_colorTxMsgButtons=m_settings->value("ColorTxMessageButtons",false).toBool();
+  m_colorTxMsgButtons=m_settings->value("ColorTxMessageButtons",true).toBool();
   ui->actionColor_Tx_message_buttons->setChecked(m_colorTxMsgButtons);
+
+  ui->actionBand_buttons->setChecked (m_settings->value ("BandButtons", false).toBool ());   // CE3TSK
+  ui->bandButtonsWidget->setVisible (ui->actionBand_buttons->isChecked ());
 
   m_callToClipboard=m_settings->value("CallsignToClipboard",true).toBool();
   ui->actionCallsign_to_clipboard->setChecked(m_callToClipboard);
@@ -1917,7 +2027,7 @@ void MainWindow::readSettings()
   m_autoTx=m_settings->value("QuickCall",true).toBool();
   ui->AutoTxButton->setChecked(m_autoTx);
 
-  m_autoseq=m_settings->value("AutoSequence",false).toBool();
+  m_autoseq=m_settings->value("AutoSequence",true).toBool();
   if (m_autoseq) { clearDXfields(""); enableTab1TXRB(false); }
   ui->AutoSeqButton->setChecked(m_autoseq);
   setAutoSeqButtonStyle(m_autoseq);
@@ -1970,6 +2080,7 @@ void MainWindow::setStopHSym()
     else m_hsymStop=49;
   }
   else if(m_mode=="FT4") m_hsymStop=21;
+  else if(m_mode=="FT2") m_hsymStop=22;   // CE3TSK: 22*1728 = 38016 samples of a 45000-sample period
   else if(m_mode.startsWith("JT") or m_mode=="T10") { m_hsymStop=173; if(m_config.decode_at_52s()) m_hsymStop=179; }
   else if(m_mode.startsWith ("WSPR")) m_hsymStop=396;
 }
@@ -1982,12 +2093,17 @@ void MainWindow::setClockStyle(bool reset)
   QString second = t.time().toString("ss");
   QString secms = t.time().toString("ss.zzz");
   secms.remove(2,1); int ft4int = secms.toInt()/7500;
+  int ft2int = secms.toInt()/3750;   // CE3TSK: FT2's period index inside the minute, 0..15
 
   if(m_start || reset) {
     if(m_mode.startsWith("FT")) {
       if(m_mode=="FT8") {
 		int isecond = second.toInt();
 		if((isecond >= 0 &&  isecond < 15) || (isecond >= 30 &&  isecond < 45)) ui->labUTC->setStyleSheet(QString("font-size: 18pt;background: %1;color : %2").arg(Radio::convert_dark("#96ffff",m_useDarkStyle),Radio::convert_dark("#1400b1",m_useDarkStyle)));
+        else ui->labUTC->setStyleSheet(QString("font-size: 18pt;background: %1;color: %2").arg(Radio::convert_dark("#ffff96",m_useDarkStyle),Radio::convert_dark("#0000ff",m_useDarkStyle)));
+      }
+      else if(m_mode=="FT2") {   // CE3TSK: the same alternation, at FT2's rate
+        if(ft2int%2==0) ui->labUTC->setStyleSheet(QString("font-size: 18pt;background: %1;color : %2").arg(Radio::convert_dark("#96ffff",m_useDarkStyle),Radio::convert_dark("#1400b1",m_useDarkStyle)));
         else ui->labUTC->setStyleSheet(QString("font-size: 18pt;background: %1;color: %2").arg(Radio::convert_dark("#ffff96",m_useDarkStyle),Radio::convert_dark("#0000ff",m_useDarkStyle)));
       }
       else if(m_mode=="FT4") {
@@ -2048,6 +2164,7 @@ void MainWindow::setMinButton()
 	if(m_txFirst) {
 	  if(m_mode.startsWith("FT")) {
 		if(m_mode=="FT8") ui->TxMinuteButton->setText("TX 00/30");
+		else if(m_mode=="FT2") ui->TxMinuteButton->setText("TX 0.0");   // CE3TSK: FT2's periods start every 3.75 s
 		else ui->TxMinuteButton->setText("TX 00");
       }
       else ui->TxMinuteButton->setText(tr("TX Even"));
@@ -2055,6 +2172,7 @@ void MainWindow::setMinButton()
     } else {
 	  if(m_mode.startsWith("FT")) {
 		if(m_mode=="FT8") ui->TxMinuteButton->setText("TX 15/45");
+        else if(m_mode=="FT2") ui->TxMinuteButton->setText("TX 3.75");   // CE3TSK
         else ui->TxMinuteButton->setText("TX 7.5");
       } 
       else ui->TxMinuteButton->setText(tr("TX Odd"));
@@ -2173,12 +2291,12 @@ void MainWindow::dataSink(qint64 frames)
 //printf("%s lost audio blocks %d \n",m_jtdxtime->currentDateTimeUtc2().toString("hh:mm:ss").toStdString().c_str(),nlostaudio);
       quint64 timedelta = m_jtdxtime->currentMSecsSinceEpoch2() - m_mslastMon;
       if(timedelta > 14990) {
-        if(nlostaudio < 3) ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ffff00",m_useDarkStyle)));
-        else ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ff8000",m_useDarkStyle)));
+        if(nlostaudio < 3) setBandLabelColour ("#ffff00");
+        else setBandLabelColour ("#ff8000");
         ui->label_6->setText(tr("lost audio ")+QString::number(nlostaudio));
         if(m_config.write_decoded_debug()) writeToALLTXT("Lost audio blocks: " + QString::number(nlostaudio));
       }
-      else ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#fdedc5",m_useDarkStyle)));
+      else setBandLabelColour ("#fdedc5");
       nlostaudio=0; m_lostaudio=true;
     }
     if(!m_diskData && m_mode=="FT8" && ihsym>45 && ihsym<nhsymEStopFT8 && m_delay==0) {
@@ -2194,16 +2312,14 @@ void MainWindow::dataSink(qint64 frames)
 //#endif
 
   int ihsymdelay=0;
-  if(m_delay > 0) {
-  float fdelta=float(m_delay)*0.345; // 1/(0.29*10)
-  if(fmod(fdelta,1.0)>0.49) ihsymdelay=qCeil(fdelta)+ihsym;
-  else ihsymdelay=qFloor(fdelta)+ihsym;
-  }
+  if(m_delay > 0) ihsymdelay=delay_blocks(m_delay,m_nsps)+ihsym;   // CE3TSK: modetiming.h
 //cycling approximately once per 269..301 milliseconds
   if((m_mode=="FT8" && m_delay==0 && ihsym == nhsymEStopFT8)
      || (m_mode=="FT8" && m_delay > 0 && ihsymdelay >= nhsymEStopFT8)
      || (m_mode=="FT4" && m_delay==0 && ihsym == m_hsymStop)
      || (m_mode=="FT4" && m_delay > 0 && ihsymdelay >= m_hsymStop)
+     || (m_mode=="FT2" && m_delay==0 && ihsym == m_hsymStop)          // CE3TSK
+     || (m_mode=="FT2" && m_delay > 0 && ihsymdelay >= m_hsymStop)
      || ((m_mode.startsWith("JT") || m_mode=="T10") && m_delay==0 && ihsym == m_hsymStop)
      || ((m_mode.startsWith("JT") || m_mode=="T10") && m_delay > 0 && ihsymdelay >= m_hsymStop)
      || (m_mode.startsWith("WSPR") && ihsym == m_hsymStop)) {
@@ -2212,6 +2328,9 @@ void MainWindow::dataSink(qint64 frames)
     if(lastdelayed && !m_modeChanged) {
       if(m_mode=="FT8" && last.secsTo(now)<12) { lastdelayed=false; return; }
       else if(m_mode=="FT4" && last.secsTo(now)<6) { lastdelayed=false; return; }
+      /* CE3TSK: FT2's guard is half a period, 1.9 s, and it has to be counted in milliseconds -
+         secsTo () truncates, so a 3.75 s period cannot be guarded with whole seconds. */
+      else if(m_mode=="FT2" && last.msecsTo(now)<1900) { lastdelayed=false; return; }
       else if(!m_mode.startsWith("FT") && !m_mode.startsWith("WSPR") && last.secsTo(now)<46) { lastdelayed=false; return; }
       lastdelayed=false;
     }
@@ -2230,7 +2349,8 @@ void MainWindow::dataSink(qint64 frames)
       // CE3TSK P7: the decode of a period in which we transmitted is skipped while the TX
       // background is enabled, so the background runs on through our TX period (decodebudget.h)
       int const thisPeriod = period_index_of_trigger (0.001 * (m_jtdxtime->currentMSecsSinceEpoch2 () % 86400000), m_TRperiod);
-      if(skip_own_tx_decode (m_diskData, (m_mode=="FT8" && m_bgEnabled) || (m_mode=="FT4" && m_ft4BgEnabled), m_txPeriod, thisPeriod)) {   // item 80: FT4 too
+      if(skip_own_tx_decode (m_diskData, (m_mode=="FT8" && m_bgEnabled) || (m_mode=="FT4" && m_ft4BgEnabled)
+                             || (m_mode=="FT2" && m_ft2Recipe.bgon), m_txPeriod, thisPeriod)) {   // item 80: FT4 too; step 5: FT2 too
         last=now;
         if(m_config.write_decoded_debug()) writeToALLTXT("Decode skipped: own TX period, TX background running");
         // what the empty decode's <DecodeFinished> used to do for this period: the sequencer's
@@ -2240,7 +2360,7 @@ void MainWindow::dataSink(qint64 frames)
         if (m_autoseq && !m_manualDecode) process_Auto();
       } else {
       last=now; decode(); 
-      if(!m_lostaudio) { ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#fdedc5",m_useDarkStyle))); ui->label_6->setText(tr("Band")); }
+      if(!m_lostaudio) { setBandLabelColour ("#fdedc5"); ui->label_6->setText(tr("Band")); }
       }
     }
     m_delay=0;
@@ -2258,6 +2378,7 @@ void MainWindow::dataSink(qint64 frames)
       m_fileToSave.clear ();
       int samples=m_TRperiod*12000;
       if(m_mode=="FT4") samples=21*3456;
+      if(m_mode=="FT2") samples=22*1728;   // CE3TSK: what the decoder is given, as FT4's line does
       // the following is potential a threading hazard - not a good
       // idea to pass pointer to be processed in another thread
       if ((m_saveWav==2 || m_saveWav==1 || m_mode.mid (0,4) == "WSPR") && !m_fnameWE.isEmpty ())
@@ -2382,11 +2503,7 @@ void MainWindow::offerRecommendedColors ()
   if (QMessageBox::Yes == mb.exec ())
     {
       m_config.accept_recommended_colors ();
-      /* the same follow-up the settings dialog does for a style change: the lines already on
-         screen carry the old style's colours baked into their HTML, so start both windows again */
-      m_useDarkStyle = m_config.useDarkStyle (); setDecodeMenuColours ();
-      ui->decodedTextBrowser->clear (); ui->decodedTextBrowser2->clear ();
-      styleChanged ();
+      darkStyleChanged ();   // the same follow-up as a style change from Settings
       if (m_config.write_decoded_debug ()) writeToALLTXT ("Recommended colours and dark style applied on first run");
     }
   else
@@ -2404,6 +2521,7 @@ void MainWindow::on_actionSettings_triggered()               //Setup Dialog
   m_grid = m_config.my_grid();
   m_callNotif = m_config.callNotif();
   m_gridNotif = m_config.gridNotif();
+  m_countryNameTranslated = m_config.countryNameTranslated();
   m_timeFrom = m_config.timeFrom();
   bool spot_to_dxsummit = m_config.spot_to_dxsummit();
 
@@ -2413,15 +2531,8 @@ void MainWindow::on_actionSettings_triggered()               //Setup Dialog
       ui->decodedTextBrowser2->setConfiguration (&m_config);
       refreshSpecialOp (); /* CE3TSK: before anything below reads m_wwDigi */
       if (m_config.useDarkStyle() != m_useDarkStyle) {
-        m_useDarkStyle = m_config.useDarkStyle(); setDecodeMenuColours();
-        /* CE3TSK: the decoded lines already on screen carry the colors of the style they were
-           written under, baked into their HTML - after the switch they are the wrong ones (a
-           dark country column on a white background, and worse the other way). DisplayText keeps
-           no source rows, and Radio::convert_dark clamps at 0 so it cannot be inverted, so the
-           only honest option is to start both windows again. */
-        ui->decodedTextBrowser->clear(); ui->decodedTextBrowser2->clear();
+        darkStyleChanged ();
         if(m_config.write_decoded_debug()) writeToALLTXT("Both windows cleared, triggered by dark style change");
-        styleChanged();
       }
       if(m_config.my_callsign () != m_callsign) {
         m_bMyCallStd=stdCall(m_config.my_callsign ());
@@ -2505,6 +2616,7 @@ void MainWindow::on_actionSettings_triggered()               //Setup Dialog
 
       if(m_mode=="FT8") on_actionFT8_triggered();
       else if(m_mode=="FT4") on_actionFT4_triggered();
+      else if(m_mode=="FT2") on_actionFT2_triggered();   // CE3TSK
       else if(m_mode=="JT9+JT65") on_actionJT9_JT65_triggered();
       else if(m_mode=="JT9") on_actionJT9_triggered();
       else if(m_mode=="JT65") on_actionJT65_triggered();
@@ -2516,6 +2628,7 @@ void MainWindow::on_actionSettings_triggered()               //Setup Dialog
 	  setXIT (ui->TxFreqSpinBox->value ());
       update_watchdog_label ();
       if(m_mode != "WSPR-2" && spot_to_dxsummit != m_config.spot_to_dxsummit()) {
+         m_dxCallHidden=false;   // CE3TSK
          if(m_config.spot_to_dxsummit() ) { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#c4c4ff",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
          else { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#aabec8",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
       }
@@ -2579,6 +2692,7 @@ void MainWindow::on_monitorButton_clicked (bool checked)
       auto prior = m_monitoring;
       m_monitoroff = !checked;
       monitor (checked);
+      if (!checked) initLogIfNeeded ();   // CE3TSK
 
       if (checked && !prior)
         {
@@ -2587,6 +2701,7 @@ void MainWindow::on_monitorButton_clicked (bool checked)
               // put rig back where it was when last in control
               m_freqNominal = m_lastMonitoredFrequency;
               m_freqTxNominal = m_freqNominal;
+              highlightBandButton ();   // CE3TSK
               setRig ();
               setXIT (ui->TxFreqSpinBox->value ());
             }
@@ -2615,11 +2730,17 @@ void MainWindow::monitor (bool state)
       curtime.remove(2,1); curtime.remove(3,2);
       int curdsec = curtime.toInt();
       if(m_addtx==-1) m_addtx=2; else if(m_addtx==-2) m_addtx=4; else m_addtx=0; // no delay for manual triggering Monitor button
+      /* CE3TSK: one implementation for every mode (modetiming.h). The remainder has to be taken
+         in milliseconds: FT2's period is 37.5 tenths, so tenths cannot express it. */
+      qint64 const msmin=currentTime.time().second()*1000 + currentTime.time().msec();
       if(m_mode == "FT8") {
-         curdsec=curdsec%150; if(curdsec > 0 && curdsec < 90) m_delay=curdsec+m_addtx; else m_delay = 0;
+         curdsec=period_position_tenths(msmin,tr_period_of(m_mode)); if(curdsec > 0 && curdsec < 90) m_delay=curdsec+m_addtx; else m_delay = 0;
       }
       else if(m_mode == "FT4") {
-         curdsec=curdsec%75; if(curdsec > 0 && curdsec < 40) m_delay=curdsec+m_addtx; else m_delay = 0;
+         curdsec=period_position_tenths(msmin,tr_period_of(m_mode)); if(curdsec > 0 && curdsec < 40) m_delay=curdsec+m_addtx; else m_delay = 0;
+      }
+      else if(m_mode == "FT2") {
+         curdsec=period_position_tenths(msmin,tr_period_of(m_mode)); if(curdsec > 0 && curdsec < 20) m_delay=curdsec+m_addtx; else m_delay = 0;
       }
 	  else if(!m_mode.startsWith("WSPR")) {
          if(curdsec > 0 && curdsec < 350) m_delay=curdsec+m_addtx; else m_delay = 0; // 2 second processing delay
@@ -2649,11 +2770,11 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
     ui->sbTxPercent->setPalette(palette);
   }
   if(m_enableTx) {
-	 ui->enableTxButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-radius: 5px;border-color: %3;min-width: 63px;padding: 0px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ff3c3c",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
+	 setEnableTxButtonStyle ();
   } else {
 // sync TX variables 
      if(!m_transmitting) { m_bTxTime=false; m_tx_when_ready=false; m_restart=false; m_txNext=false; }
-	 ui->enableTxButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 63px;padding: 0px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#dcdcdc",m_useDarkStyle),Radio::convert_dark("#adadad",m_useDarkStyle)));
+	 setEnableTxButtonStyle ();
   }
 }
 
@@ -2851,6 +2972,7 @@ void MainWindow::displayDialFrequency ()
   Frequency dial_frequency {m_rigState.ptt () && m_rigState.split () ?
       m_rigState.tx_frequency () : m_rigState.frequency ()};
   if(m_monitoroff && m_config.rig_name()=="None") dial_frequency=m_freqNominal;
+  if (dialWheelHolding ()) dial_frequency = m_dialWheelTarget;   // CE3TSK: the wheel's target, not the rig's older report
   // lookup band
   auto const& band_name = m_config.bands ()->find (dial_frequency);
 //  printf("last band %s curband %s band %s freq %lld\n",m_lastBand.toStdString().c_str(),ui->bandComboBox->currentText().toStdString().c_str(),band_name.toStdString().c_str(),dial_frequency);
@@ -2935,6 +3057,290 @@ void MainWindow::displayDialFrequency ()
   }
 }
 
+/* CE3TSK: widgets coloured by what they show as well as by the style - the rig lamp by the last rig
+   event, the "Band" label by lost audio or clock drift, the mode label by the mode, the DX call
+   field after a logged QSO, the Enable Tx, Hound and DX Call buttons by their state. Their colour is
+   set through these, which remember it, so styleChanged () can paint the same state again after a
+   style switch; before, they kept the old style's colours until their state next changed. */
+void MainWindow::setRigLamp (QString const& colour)
+{
+  m_rigLampColour = colour;
+  ui->readFreq->setStyleSheet(ui->readFreq->styleSheet().left(230)+QString("background: %1;\n color: %2;\n}").arg(Radio::convert_dark(colour,m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
+}
+
+void MainWindow::setBandLabelColour (QString const& colour)
+{
+  m_bandLabelColour = colour;
+  ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark(colour,m_useDarkStyle)));
+}
+
+void MainWindow::setModeLabelStyle (QString const& mode)
+{
+  QString colour {"#6699ff"};   // FT8
+  if (mode == "JT9") colour = "#ff99cc";
+  else if (mode == "T10") colour = "#aaffff";
+  else if (mode == "FT4") colour = "#a99ee2";
+  else if (mode == "FT2") colour = "#ffacda";   // CE3TSK
+  else if (mode == "JT65") colour = "#66ff66";
+  else if (mode == "JT9+JT65") colour = "#ffff66";
+  else if (mode == "WSPR-2") colour = "#ff66ff";
+  mode_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark(colour,m_useDarkStyle)));
+}
+
+void MainWindow::setDxCallEntryColour (QString const& background)
+{
+  m_dxCallEntryColour = background;
+  ui->dxCallEntry->setStyleSheet(QString("QLineEdit {color: %1; background: %2}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark(background,m_useDarkStyle)));
+}
+
+void MainWindow::setEnableTxButtonStyle ()
+{
+  if(m_enableTx) ui->enableTxButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-radius: 5px;border-color: %3;min-width: 63px;padding: 0px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ff3c3c",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
+  else ui->enableTxButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 63px;padding: 0px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#dcdcdc",m_useDarkStyle),Radio::convert_dark("#adadad",m_useDarkStyle)));
+}
+
+void MainWindow::setHoundButtonStyle ()
+{
+  if(m_houndMode) ui->HoundButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-radius: 5px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#00ff00",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
+  else ui->HoundButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#e1e1e1",m_useDarkStyle),Radio::convert_dark("#adadad",m_useDarkStyle)));
+}
+
+void MainWindow::setSpotButtonStyle ()
+{
+  QString const background {m_dxCallHidden ? "#00ff00" : m_spotDXsummit ? "#c4ffc4" : (m_config.spot_to_dxsummit() ? "#c4c4ff" : "#aabec8")};
+  ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark(background,m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle)));
+}
+
+void MainWindow::setTxStatusColour (QString const& colour)
+{
+  m_txStatusColour = colour;
+  if (colour.isEmpty ()) tx_status_label->setStyleSheet ("");
+  else tx_status_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark(colour,m_useDarkStyle)));
+}
+
+// the progress bar is restyled every second only while monitoring, transmitting or idle - not in file mode
+void MainWindow::setProgressBarStyle ()
+{
+  QString cssSafe = QString("QProgressBar { border: 2px solid %1; border-radius: 5px; background: %2; text-align: center; } QProgressBar::chunk { background: %3; width: 1px; }").arg(Radio::convert_dark("#808080",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle),Radio::convert_dark("#00ff00",m_useDarkStyle));
+  QString cssTransmit = QString("QProgressBar { border: 2px solid %1; border-radius: 5px; background: %2; text-align: center; } QProgressBar::chunk { background: %3; width: 1px; }").arg(Radio::convert_dark("#808080",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle),Radio::convert_dark("#ff0000",m_useDarkStyle));
+  progressBar->setStyleSheet (m_transmitting ? cssTransmit : cssSafe);
+}
+
+/* CE3TSK: View > Band buttons - one button per frequency the band selector offers for the mode:
+   the default working frequency of each band for the current mode and IARU region, or, while a
+   contest is selected, every entry of that contest's own set. The list is re-filtered on each
+   mode change and swapped on each contest change, so the buttons are rebuilt from its change
+   signals, coalesced to one rebuild per pass of the event loop. */
+void MainWindow::on_actionBand_buttons_toggled (bool checked)
+{
+  ui->bandButtonsWidget->setVisible (checked);
+  rebuildBandButtons ();
+}
+
+void MainWindow::scheduleBandButtons ()
+{
+  auto * const frequencies = m_config.frequencies ();
+  if (m_bandButtonsModel != frequencies)
+    {
+      for (auto const& connection : m_bandButtonsConnections) disconnect (connection);
+      m_bandButtonsConnections.clear ();
+      m_bandButtonsModel = frequencies;
+      auto const later = [this] { m_bandButtonsTimer.start (); };
+      m_bandButtonsConnections
+        << connect (frequencies, &QAbstractItemModel::modelReset, this, later)
+        << connect (frequencies, &QAbstractItemModel::layoutChanged, this, later)
+        << connect (frequencies, &QAbstractItemModel::rowsInserted, this, later)
+        << connect (frequencies, &QAbstractItemModel::rowsRemoved, this, later)
+        << connect (frequencies, &QAbstractItemModel::dataChanged, this, later);
+    }
+  m_bandButtonsTimer.start ();
+}
+
+void MainWindow::rebuildBandButtons ()
+{
+  qDeleteAll (m_bandButtons);
+  m_bandButtons.clear ();
+  if (!ui->actionBand_buttons->isChecked ()) return;   // built when shown
+  auto const * const frequencies = m_config.frequencies ();
+  bool const contest {m_config.special_op_id () != Configuration::SpecialOperatingActivity::NONE};
+  QList<Radio::Frequency> wanted;
+  for (int row = 0; row < frequencies->rowCount (); ++row)
+    {
+      auto const source = frequencies->mapToSource (frequencies->index (row, FrequencyList_v2::frequency_column));
+      if (!source.isValid ()) continue;
+      auto const& item = frequencies->frequency_list ()[source.row ()];
+      if ((contest || item.default_) && !wanted.contains (item.frequency_)) wanted << item.frequency_;
+    }
+  std::sort (wanted.begin (), wanted.end ());
+  QHash<QString, int> per_band;
+  for (auto const f : wanted) ++per_band[m_config.bands ()->find (f)];
+  static QRegularExpression const metre_band {R"(^\d+m$)"};
+  for (auto const f : wanted)
+    {
+      auto const band = m_config.bands ()->find (f);
+      bool const by_frequency {band.isEmpty () || per_band.value (band) > 1};
+      QString label {band};
+      if (by_frequency)
+        {
+          // two buttons on one band: name them by frequency, 50.313 and 50.323
+          label = QString::number (f / 1e6, 'f', 6);
+          while (label.endsWith ('0')) label.chop (1);
+          if (label.endsWith ('.')) label.chop (1);
+        }
+      else if (metre_band.match (band).hasMatch ()) label.chop (1);   // 20m -> 20; 70cm stays as it is
+      auto * const button = new QPushButton {label, ui->bandButtonsWidget};
+      // the tooltip says what the label does not: the frequency of a band button, the band of a
+      // frequency button
+      if (by_frequency && !band.isEmpty ()) button->setToolTip (band);
+      else
+        {
+          QLocale const locale;   // the dial's decimal point, without its trailing zeros: 14,074 and 7,0475
+          QString mhz {locale.toString (f / 1e6, 'f', 6)};
+          while (mhz.endsWith (locale.zeroDigit ())) mhz.chop (1);
+          if (mhz.endsWith (locale.decimalPoint ())) mhz.chop (1);
+          button->setToolTip (mhz + " MHz");
+        }
+      button->setCheckable (true);
+      button->setFocusPolicy (Qt::NoFocus);
+      button->setProperty ("frequency", QVariant::fromValue<qulonglong> (f));
+      connect (button, &QPushButton::clicked, this, [this, f] { selectBandButton (f); });
+      ui->bandButtonsLayout->addWidget (button);
+      m_bandButtons << button;
+    }
+  highlightBandButton ();
+}
+
+void MainWindow::selectBandButton (Radio::Frequency frequency)
+{
+  auto const * const frequencies = m_config.frequencies ();
+  for (int row = 0; row < frequencies->rowCount (); ++row)
+    {
+      auto const source = frequencies->mapToSource (frequencies->index (row, FrequencyList_v2::frequency_column));
+      if (source.isValid () && frequencies->frequency_list ()[source.row ()].frequency_ == frequency)
+        {
+          // exactly what picking the row in the band selector does, as switch_mode () does it
+          ui->bandComboBox->setCurrentIndex (row);
+          on_bandComboBox_activated (row);
+          break;
+        }
+    }
+  highlightBandButton ();
+}
+
+void MainWindow::highlightBandButton ()
+{
+  if (m_bandButtons.isEmpty ()) return;
+  QPushButton * exact {nullptr};
+  QPushButton * same_band {nullptr};
+  auto const band = m_config.bands ()->find (m_freqNominal);
+  for (auto * const button : m_bandButtons)
+    {
+      auto const f = button->property ("frequency").toULongLong ();
+      if (f == m_freqNominal) exact = button;
+      else if (!same_band && !band.isEmpty () && m_config.bands ()->find (f) == band) same_band = button;   // out of band matches nothing
+    }
+  auto * const lit = exact ? exact : same_band;
+  for (auto * const button : m_bandButtons) button->setChecked (button == lit);
+}
+
+/* CE3TSK: tuning with the mouse wheel over the dial frequency. Only the three kHz digits after the
+   decimal point respond - in "7.074 000" the 0, the 7 and the 4 - so a notch moves the dial by
+   100, 10 or 1 kHz, carrying into the next digit the way a sum does (7.079 + 1 kHz = 7.080,
+   7.000 - 1 kHz = 6.999). The MHz digits would change the band and the Hz digits are finer than
+   any use, so both are left alone, and so is a step that would take the dial out of the band it
+   is in. Notches in a burst show on the display at once and reach the rig as one QSY 200 ms after
+   the last, through band_changed () like the band selector; until the rig reports the new
+   frequency the display holds the target. Nothing happens while transmitting or tuning. */
+bool MainWindow::dialFrequencyWheel (QWheelEvent * event)
+{
+  if (m_transmitting || m_tune) return false;
+  auto const * const label = ui->labDialFreq;
+  auto const text = label->text ();   // "7.074 000": the kHz digits are 7, 6 and 5 from the end in any locale
+  if (text.size () < 8) return false;
+  QFontMetrics const metrics {label->font ()};
+  int const margin {label->margin ()};
+  auto const area = label->contentsRect ().adjusted (margin, margin, -margin, -margin);
+  int const left {area.left () + (area.width () - metrics.horizontalAdvance (text)) / 2};   // the .ui centres the text
+  int const x {event->position ().toPoint ().x ()};
+  int digit {-1};
+  for (int i = 0; i < 3; ++i)
+    {
+      int const at {text.size () - 7 + i};
+      int const from {left + metrics.horizontalAdvance (text.left (at))};
+      if (text.at (at).isDigit () && x >= from && x < from + metrics.horizontalAdvance (text.at (at))) digit = i;
+    }
+  if (digit < 0) return false;
+  m_dialWheelDelta += event->angleDelta ().y ();
+  int const notches {m_dialWheelDelta / 120};
+  if (!notches) return true;   // part of a notch, from a touchpad
+  m_dialWheelDelta -= notches * 120;
+  Frequency const from {dialWheelHolding () ? m_dialWheelTarget : m_freqNominal};
+  qint64 const to {static_cast<qint64> (from) + notches * (digit == 0 ? 100000 : digit == 1 ? 10000 : 1000)};
+  if (to <= 0 || m_config.bands ()->find (static_cast<Frequency> (to)) != m_config.bands ()->find (from)) return true;   // stays in its band
+  m_dialWheelTarget = static_cast<Frequency> (to);
+  m_dialWheelClock.start ();
+  m_dialWheelTimer.start ();
+  displayDialFrequency ();
+  return true;
+}
+
+void MainWindow::applyDialWheel ()
+{
+  auto const target = m_dialWheelTarget;
+  if (m_transmitting || m_tune || target == m_freqNominal) return;
+  m_bandEdited = true;
+  band_changed (target); if(m_config.write_decoded_debug()) writeToALLTXT("Band changed from dial wheel, frequency: " + QString::number(target));
+  m_dialWheelClock.start ();   // hold the target on the display while the rig catches up
+  displayDialFrequency ();
+}
+
+/* CE3TSK: a double click on the DX Call button, or on the callsign box beside it, opens the call's
+   qrz.com page - https://www.qrz.com/db/CE3TSK. A compound call keeps its slash exactly as it is:
+   qrz.com answers /db/VP2E/CE3TSK but returns 404 for the percent-encoded %2F, and the box's
+   validator allows only letters, digits and '/', so nothing here needs encoding. An empty box does
+   nothing. The button's other actions are untouched: a double click delivers a single clicked (),
+   which spots to dxsummit as before when that is enabled, and m_spotDXsummit stops a second spot. */
+void MainWindow::lookupDxCallOnQrz ()
+{
+  auto const call = ui->dxCallEntry->text ().trimmed ().toUpper ();
+  if (call.isEmpty ()) return;
+  QDesktopServices::openUrl (QUrl {"https://www.qrz.com/db/" + call});
+}
+
+bool MainWindow::dialWheelHolding () const
+{
+  return m_dialWheelClock.isValid () && m_dialWheelClock.elapsed () < 1500 && !m_transmitting;
+}
+
+/* CE3TSK: the dark style was switched - from Settings, the first-run colour offer or View > Use
+   dark style. The decoded lines already on screen carry the colors of the style they were
+   written under, baked into their HTML - after the switch they are the wrong ones (a dark
+   country column on a white background, and worse the other way). DisplayText keeps no source
+   rows, and Radio::convert_dark clamps at 0 so it cannot be inverted, so the only honest option
+   is to start both windows again. */
+void MainWindow::darkStyleChanged ()
+{
+  m_useDarkStyle = m_config.useDarkStyle(); setDecodeMenuColours();
+  // the windows colour each new line from the style flag they copied in setConfiguration ()
+  ui->decodedTextBrowser->setConfiguration (&m_config);
+  ui->decodedTextBrowser2->setConfiguration (&m_config);
+  ui->actionUse_dark_style->setChecked (m_useDarkStyle);
+  ui->decodedTextBrowser->clear(); ui->decodedTextBrowser2->clear();
+  styleChanged();
+}
+
+/* CE3TSK: View > Use dark style, the same switch as the check box in Settings, General */
+void MainWindow::on_actionUse_dark_style_triggered (bool checked)
+{
+  m_config.set_dark_style (checked);
+  if (m_config.useDarkStyle () != m_useDarkStyle)
+    {
+      darkStyleChanged ();
+      if(m_config.write_decoded_debug()) writeToALLTXT("Both windows cleared, triggered by dark style change");
+    }
+  else ui->actionUse_dark_style->setChecked (m_useDarkStyle);   // the style could not be switched
+}
+
 void MainWindow::styleChanged()
 {
   updateTimingLamps();   // CE3TSK: the lamps carry their own palette, light and dark
@@ -2953,20 +3359,14 @@ void MainWindow::styleChanged()
 	else if (m_config.autolog ()) { qso_count_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#9999ff",m_useDarkStyle))); }
 	else { qso_count_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ffffff",m_useDarkStyle))); }
   }
-ui->dxCallEntry->setStyleSheet(QString("QLineEdit {color: %1; background: %2}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle)));
-ui->enableTxButton->setStyleSheet(QString("QPushButton{color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 63px;padding: 0px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),
-    Radio::convert_dark("#dcdcdc",m_useDarkStyle),Radio::convert_dark("#adadad",m_useDarkStyle)));
+setDxCallEntryColour (m_dxCallEntryColour.isEmpty () ? QString {"#ffffff"} : m_dxCallEntryColour);
+setEnableTxButtonStyle ();
   /* CE3TSK: the Ko-fi artwork has a light and a dark variant, swap with the style */
   if (auto * kofi = qobject_cast<QToolButton *> (ui->menuBar->cornerWidget (Qt::TopRightCorner)))
     kofi->setIcon (QIcon {m_useDarkStyle ? ":/support_cup_dark.png" : ":/support_cup_light.png"});
   setLastLogdLabel();
   setAutoSeqButtonStyle(m_autoseq);
-  if(m_config.spot_to_dxsummit()) {
-    ui->pbSpotDXCall->setStyleSheet(QString("QPushButton{color: %1;background: %2;border-style: outset; border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),
-      Radio::convert_dark("#c4c4ff",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
-  else {
-    ui->pbSpotDXCall->setStyleSheet(QString("QPushButton{color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),
-      Radio::convert_dark("#aabec8",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
+  setSpotButtonStyle ();
 //  ui->txrb1->setStyleSheet(QString("QRadioButton::indicator:checked:disabled{background: %1;width: 6px;height: 6px;border-radius: 3px;margin-left: 3px}").arg(Radio::convert_dark("#222222",m_useDarkStyle)));
 //  ui->txrb2->setStyleSheet(QString("QRadioButton::indicator:checked:disabled{background: %1;width: 6px;height: 6px;border-radius: 3px;margin-left: 3px}").arg(Radio::convert_dark("#222222",m_useDarkStyle)));
 //  ui->txrb3->setStyleSheet(QString("QRadioButton::indicator:checked:disabled{background: %1;width: 6px;height: 6px;border-radius: 3px;margin-left: 3px}").arg(Radio::convert_dark("#222222",m_useDarkStyle)));
@@ -2986,6 +3386,22 @@ ui->enableTxButton->setStyleSheet(QString("QPushButton{color: %1;background: %2;
   ui->hintButton->setStyleSheet(QString("QPushButton:checked{background: %1}").arg(Radio::convert_dark("#00ff00",m_useDarkStyle)));
   ui->syncButton->setStyleSheet(QString("QPushButton:checked{background: %1}").arg(Radio::convert_dark("#00ff00",m_useDarkStyle)));
   ui->DecodeButton->setStyleSheet(QString("QPushButton:checked{background: %1}").arg(Radio::convert_dark("#00ffff",m_useDarkStyle)));
+  /* CE3TSK: the colours that follow a state rather than the style alone, painted again so a switch
+     looks the way a fresh start in the new style would (see setRigLamp) */
+  if (!m_rigLampColour.isEmpty ()) setRigLamp (m_rigLampColour);
+  if (!m_bandLabelColour.isEmpty ()) setBandLabelColour (m_bandLabelColour);
+  if (!m_mode.isEmpty ()) setModeLabelStyle (m_mode);
+  setClockStyle (true);   // the clock, and in WSPR the TX minute button
+  if (!m_mode.startsWith ("WSPR")) setMinButton ();
+  setProgressBarStyle ();
+  setTxStatusColour (m_txStatusColour);
+  if (!ui->HoundButton->styleSheet ().isEmpty ()) setHoundButtonStyle ();
+  if (m_txbColorSet) setTxMsgBtnColor ();
+  on_tx5_currentTextChanged (ui->tx5->currentText ());
+  on_freeTextMsg_currentTextChanged (ui->freeTextMsg->currentText ());
+  if (!ui->bandComboBox->lineEdit ()->styleSheet ().isEmpty ())   // out of band
+    ui->bandComboBox->lineEdit ()->setStyleSheet (QString("QLineEdit {color: %1; background-color : %2}").arg(Radio::convert_dark("#ffff00",m_useDarkStyle),Radio::convert_dark("#ff0000",m_useDarkStyle)));
+  if (Qt::RichText == ui->decodedTextLabel->textFormat ()) updateDecodeLabel ();   // Avg= and Lag= carry colours
   m_wideGraph->setDarkStyle(m_useDarkStyle);
   statusUpdate ();
 }
@@ -3040,6 +3456,20 @@ bool MainWindow::eventFilter(QObject *object, QEvent *event)  //eventFilter()
       if(!m_showTooltips) return true;
       break;
 
+    case QEvent::Wheel:
+      // CE3TSK: the wheel over a kHz digit of the dial frequency tunes it
+      if (object == ui->labDialFreq && dialFrequencyWheel (static_cast<QWheelEvent *> (event))) return true;
+      break;
+
+    case QEvent::MouseButtonDblClick:
+      // CE3TSK: the DX Call button or the callsign box looks the call up on qrz.com
+      if (object == ui->pbSpotDXCall || object == ui->dxCallEntry)
+        {
+          lookupDxCallOnQrz ();
+          if (object == ui->pbSpotDXCall) return true;   // the box keeps its own word selection
+        }
+      break;
+
     default: break;
     }
 
@@ -3055,7 +3485,7 @@ void MainWindow::createStatusBar()                           //createStatusBar
   tx_status_label->setAlignment(Qt::AlignVCenter);
   tx_status_label->setContentsMargins(1,1,1,1); //(int left, int top, int right, int bottom)
   tx_status_label->setMinimumSize(QSize(150,20));
-  tx_status_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#00ff00",m_useDarkStyle)));
+  setTxStatusColour ("#00ff00");
   tx_status_label->setFrameStyle(QFrame::Panel | QFrame::Sunken);
   statusBar()->addWidget(tx_status_label);
 
@@ -3187,7 +3617,7 @@ void MainWindow::closeEvent(QCloseEvent * e)
   QMainWindow::closeEvent (e);
 }
 
-void MainWindow::on_stopButton_clicked() { monitor (false); m_loopall=false; }
+void MainWindow::on_stopButton_clicked() { monitor (false); m_loopall=false; if (!m_transmitting) initLogIfNeeded (); }
 void MainWindow::on_AnsB4Button_clicked (bool checked) { ui->actionAnswerWorkedB4->setChecked(checked); }
 void MainWindow::on_singleQSOButton_clicked (bool checked) { ui->actionSingleShot->setChecked(checked); }
 void MainWindow::on_bypassButton_clicked (bool checked) { ui->actionBypass_all_text_filters->setChecked(checked); }
@@ -3222,6 +3652,7 @@ void MainWindow::on_pbSpotDXCall_clicked ()
 //    } else {
 //      printf("Failure : %s\n",reply->errorString().toStdString().c_str());
 //    }
+      m_dxCallHidden=false;   // CE3TSK
       ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#c4ffc4",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle)));
       ui->pbSpotDXCall->setText(tr("Spotted"));
       m_spotDXsummit=true;
@@ -3284,7 +3715,7 @@ void MainWindow::on_actionOpen_triggered()                     //Open File
     m_path=fname;
     int i1=fname.lastIndexOf("/");
     QString baseName=fname.mid(i1+1);
-    tx_status_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#99ffff",m_useDarkStyle)));
+    setTxStatusColour ("#99ffff");
     tx_status_label->setText(" " + baseName + " ");
     on_stopButton_clicked();
     m_diskData=true;
@@ -3567,7 +3998,7 @@ void MainWindow::on_actionOpen_next_in_directory_triggered()   //Open Next
       m_path=fname;
       int i1=fname.lastIndexOf("/");
       QString baseName=fname.mid(i1+1);
-      tx_status_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#99ffff",m_useDarkStyle)));
+      setTxStatusColour ("#99ffff");
       tx_status_label->setText(" " + baseName + " ");
       m_diskData=true;
       read_wav_file (fname);
@@ -3743,12 +4174,12 @@ void MainWindow::on_actionEnable_hound_mode_toggled(bool checked)
   m_wideGraph->setHoundFilter(m_houndMode);
   ui->HoundButton->setChecked(m_houndMode);
   if(m_houndMode) {
-    ui->HoundButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-radius: 5px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#00ff00",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
+    setHoundButtonStyle ();
     if(m_skipTx1) { m_skipTx1=false; ui->skipTx1->setChecked(false); ui->skipGrid->setChecked(false); on_txb1_clicked(); m_wasSkipTx1=true; }
     ui->skipTx1->setEnabled(false); ui->skipGrid->setEnabled(false);
     if(!m_commonFT8b && m_config.rig_name() != "None") ui->actionUse_TX_frequency_jumps->setEnabled(true); }
   else {
-    ui->HoundButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#e1e1e1",m_useDarkStyle),Radio::convert_dark("#adadad",m_useDarkStyle)));
+    setHoundButtonStyle ();
     if(!m_wwDigi) { ui->skipTx1->setEnabled(true); ui->skipGrid->setEnabled(true); }   /* CE3TSK */
     if(m_wasSkipTx1) { 
       m_skipTx1=true; ui->skipTx1->setChecked(true); ui->skipGrid->setChecked(true);
@@ -3966,6 +4397,7 @@ void MainWindow::bindBandCombo ()
   /* put the previous band text back; if it is not in the new list the validator will deal
      with it exactly as it deals with any typed frequency */
   if (!shown.isEmpty ()) ui->bandComboBox->setCurrentText (shown);
+  scheduleBandButtons ();   // CE3TSK: the band buttons follow the list just bound
 }
 
 void MainWindow::refreshContestLog (bool reload)
@@ -4101,6 +4533,7 @@ void MainWindow::refreshSpecialOp (bool initial)
           else if (back == "JT9+JT65") on_actionJT9_JT65_triggered ();
           else if (back == "JT9") on_actionJT9_triggered ();
           else if (back == "T10") on_actionT10_triggered ();
+          else if (back == "FT2") on_actionFT2_triggered ();   // CE3TSK
           else if (back.startsWith ("WSPR")) on_actionWSPR_2_triggered ();
           else on_actionFT8_triggered ();
         }
@@ -4233,7 +4666,8 @@ void MainWindow::setDecodeMenuColours()
 {
   struct { QMenu* menu; char const* light; char const* dark; } const menus[] = {
     {ui->menuFT8_preset, "#dff3df", "#1e3a1e"}, {ui->menuFT8_RX, "#e4eeff", "#1b2a44"}, {ui->menuFT8_TX, "#ffe6dc", "#44221b"},
-    {ui->menuFT4_preset, "#dff3df", "#1e3a1e"}, {ui->menuFT4_RX, "#e4eeff", "#1b2a44"}, {ui->menuFT4_TX, "#ffe6dc", "#44221b"}};   // CE3TSK item 69: FT4's three the same
+    {ui->menuFT4_preset, "#dff3df", "#1e3a1e"}, {ui->menuFT4_RX, "#e4eeff", "#1b2a44"}, {ui->menuFT4_TX, "#ffe6dc", "#44221b"},   // CE3TSK item 69: FT4's three the same
+    {ui->menuFT2_preset, "#dff3df", "#1e3a1e"}, {ui->menuFT2_RX, "#e4eeff", "#1b2a44"}, {ui->menuFT2_TX, "#ffe6dc", "#44221b"}};   // CE3TSK step 5: and FT2's, the same three colours
   for (auto const& m : menus) {
     QColor const colour {m_useDarkStyle ? m.dark : m.light};
     m.menu->setStyleSheet(QString("QMenu { background-color: %1; }").arg(colour.name()));
@@ -4245,6 +4679,7 @@ void MainWindow::setDecodeMenuColours()
   // recommended preset's mark, so the entry says "presets" the way the marks do
   ui->menuFT8_preset->menuAction()->setIcon(menu_dot(QColor(preset_colour(DecodePreset::PipelineMaxDecodesLight))));
   ui->menuFT4_preset->menuAction()->setIcon(menu_dot(QColor(ft4_preset_colour(FT4Preset::Recommended))));   // item 69
+  ui->menuFT2_preset->menuAction()->setIcon(menu_dot(QColor(ft2_preset_colour(FT2Preset::Recommended))));   // CE3TSK step 5
 }
 // CE3TSK: decode bandwidth - the radio entries carry the table index in their data
 void MainWindow::setDecodeBandwidthAction()
@@ -4256,6 +4691,54 @@ void MainWindow::on_actionFT8TwoSlicings_toggled(bool checked) { m_ft8TwoSlicing
 void MainWindow::on_actionFT8AltPass_toggled(bool checked) { m_ft8AltPass=checked; }   // CE3TSK
 void MainWindow::on_actionFT4AltPass_toggled(bool checked) { m_ft4AltPass=checked; }   // CE3TSK: FT4 expert
 void MainWindow::on_actionFT4DeepOSD_toggled(bool checked) { m_ft4DeepOSD=checked; }   // CE3TSK item 58
+
+/* CE3TSK step 5: FT2's tiers. The shape is FT4's - a preset only sets the ordinary controls, and
+   the menu derives the active tier back from them when it opens - but the values are FT2's own
+   (ft2preset.h), because a 3.75 s period answers on a 0.58 s deadline. */
+void MainWindow::applyFT2Preset (FT2Preset p)
+{
+  m_ft2Recipe = ft2_preset_recipe (p);
+  m_ft2BgMargin = (p == FT2Preset::MaxEffort) ? 3 : FT2_BG_MARGIN_DEFAULT;   // as FT4's max effort narrows its margin
+  ui->actionFT2BgEnabled->setChecked(m_ft2Recipe.bgon);
+  setFT2EnsembleActions();
+  refreshFT2Preset();
+}
+
+void MainWindow::setFT2EnsembleActions()
+{
+  QAction* const rx[] = {ui->actionFT2EnsembleOff, ui->actionFT2EnsembleAuto, ui->actionFT2EnsembleBudget};
+  int const rxwant = m_ft2Recipe.members==FT4_ENSEMBLE_AUTO ? 1 : m_ft2Recipe.members==FT4_ENSEMBLE_BUDGET ? 2 : 0;
+  for (int i=0; i<3; ++i) rx[i]->setChecked(i==rxwant);
+  QAction* const bg[] = {ui->actionFT2BgEnsembleOff, ui->actionFT2BgEnsemble3, ui->actionFT2BgEnsemble6, ui->actionFT2BgEnsembleAuto};
+  int const bgwant = m_ft2Recipe.bg==FT4_ENSEMBLE_AUTO ? 3 : m_ft2Recipe.bg==6 ? 2 : m_ft2Recipe.bg==3 ? 1 : 0;
+  for (int i=0; i<4; ++i) bg[i]->setChecked(i==bgwant);
+}
+
+void MainWindow::refreshFT2Preset()
+{
+  QAction* const a[] = {ui->actionFT2PresetFast, ui->actionFT2PresetDefault,
+                        ui->actionFT2PresetRecommended, ui->actionFT2PresetMaxEffort};
+  auto const p = ft2_preset_of (m_ft2Recipe, ft4Threads());
+  for (int i=0; i<4; ++i) a[i]->setChecked(false);
+  if (p != FT2Preset::Custom) a[static_cast<int>(p)]->setChecked(true);
+  setFT2EnsembleActions();
+  refreshDecodePreset();   // CE3TSK: the lamp, exactly as refreshFT4Preset ends - without this the
+                           // tier changed and the lamp went on showing the last one
+}
+
+void MainWindow::on_actionFT2PresetFast_triggered() { applyFT2Preset (FT2Preset::Fast); }
+void MainWindow::on_actionFT2PresetDefault_triggered() { applyFT2Preset (FT2Preset::Default); }
+void MainWindow::on_actionFT2PresetRecommended_triggered() { applyFT2Preset (FT2Preset::Recommended); }
+void MainWindow::on_actionFT2PresetMaxEffort_triggered() { applyFT2Preset (FT2Preset::MaxEffort); }
+void MainWindow::on_actionFT2BgEnabled_toggled(bool checked) { m_ft2Recipe.bgon=checked; }
+void MainWindow::on_actionFT2EnsembleOff_triggered() { m_ft2Recipe.members=0; }
+void MainWindow::on_actionFT2EnsembleAuto_triggered() { m_ft2Recipe.members=FT4_ENSEMBLE_AUTO; }
+void MainWindow::on_actionFT2EnsembleBudget_triggered() { m_ft2Recipe.members=FT4_ENSEMBLE_BUDGET; }
+void MainWindow::on_actionFT2BgEnsembleOff_triggered() { m_ft2Recipe.bg=0; }
+void MainWindow::on_actionFT2BgEnsemble3_triggered() { m_ft2Recipe.bg=3; }
+void MainWindow::on_actionFT2BgEnsemble6_triggered() { m_ft2Recipe.bg=6; }
+void MainWindow::on_actionFT2BgEnsembleAuto_triggered() { m_ft2Recipe.bg=FT4_ENSEMBLE_AUTO; }
+
 // CE3TSK: FT4 presets. A preset only sets the ordinary controls - effort, alternate pass, the
 // RX member count, deep OSD and the TX background members (decodepreset.h has the recipes) -
 // and the radio state is derived back from those controls when the menu opens, exactly as the
@@ -4337,6 +4820,28 @@ void MainWindow::markFT4Presets()
   ui->actionFT4PresetRecommended->setText(tr("recommended: %1").arg(ui->actionFT4PresetRecommended->text()));
   ui->menuFT4_preset->setToolTipsVisible(true);   // as FT8's
   ui->menuFT4_preset->menuAction()->setIcon(menu_dot(QColor(ft4_preset_colour(FT4Preset::Recommended))));
+}
+
+/* CE3TSK step 5: FT2's preset menu marked as FT4's is (markFT4Presets) - the same bold text, the
+   same coloured dot from the mode's own colour table, the same "tier (cost)" entry with the recipe
+   moved into the tooltip, the same underlined "recommended:" on the tier that carries the mark, and
+   the same dot on the submenu itself. The costs are FT2's own measurements (ft2preset.h), and they
+   are quoted on the CROWDED band because that is where FT2's tiers differ: on a sparse band every
+   tier is within half a percent of the default. */
+void MainWindow::markFT2Presets()
+{
+  struct { QAction* action; char const* tier; char const* cost; FT2Preset preset; } const picks[] = {
+    {ui->actionFT2PresetRecommended, QT_TR_NOOP("best value"), "+7.4 % crowded, 0.10 s", FT2Preset::Recommended},
+    {ui->actionFT2PresetMaxEffort, QT_TR_NOOP("max effort"), "+12.5 % crowded, 0.56 s", FT2Preset::MaxEffort}};
+  for (auto const& p : picks) {
+    QFont f = p.action->font(); f.setBold(true); p.action->setFont(f);
+    p.action->setIcon(menu_dot(QColor(ft2_preset_colour(p.preset))));
+    p.action->setText(preset_menu_entry(p.action, QString("%1 (%2)").arg(tr(p.tier), p.cost)));
+  }
+  QFont f = ui->actionFT2PresetRecommended->font(); f.setUnderline(true); ui->actionFT2PresetRecommended->setFont(f);
+  ui->actionFT2PresetRecommended->setText(tr("recommended: %1").arg(ui->actionFT2PresetRecommended->text()));
+  ui->menuFT2_preset->setToolTipsVisible(true);
+  ui->menuFT2_preset->menuAction()->setIcon(menu_dot(QColor(ft2_preset_colour(FT2Preset::Recommended))));
 }
 
 void MainWindow::on_actionFT4PresetFast_triggered() { applyFT4Preset (FT4Preset::Fast); }
@@ -4557,15 +5062,16 @@ void MainWindow::updateTimingLamps()
 {
   bool const ft8 = m_mode == "FT8";
   bool const ft4 = m_mode == "FT4";
-  bool const ft = ft8 || ft4;
-  bool const bg_on = (ft8 && m_bgEnabled) || (ft4 && m_ft4BgEnabled);
+  bool const ft2 = m_mode == "FT2";   // CE3TSK step 5
+  bool const ft = ft8 || ft4 || ft2;
+  bool const bg_on = (ft8 && m_bgEnabled) || (ft4 && m_ft4BgEnabled) || (ft2 && m_ft2Recipe.bgon);
 
   ui->labelRxTiming->setAutoFillBackground (true);
   ui->labelTxTiming->setAutoFillBackground (true);
   ui->labelRxTiming->setEnabled (ft && m_rxLagKnown);
   ui->labelTxTiming->setEnabled (ft && bg_on && m_bgLastKnown);
 
-  auto const rx = (ft && m_rxLagKnown) ? rx_timing_level (m_rxLag, ft4) : TimingLevel::Unknown;
+  auto const rx = (ft && m_rxLagKnown) ? rx_timing_level (m_rxLag, ft4, m_TRperiod) : TimingLevel::Unknown;   // CE3TSK: the period tells FT2 apart
   /* the background either made the period or it did not - two colours, never amber */
   auto const tx = (ft && bg_on && m_bgLastKnown)
                     ? (m_bgLastCut ? TimingLevel::Late : TimingLevel::Good) : TimingLevel::Unknown;
@@ -4596,12 +5102,15 @@ void MainWindow::refreshDecodePreset()
   // do not apply: the lamp is greyed (disabled, the neutral box) whatever the controls say
   bool const ft8 = m_mode=="FT8";
   bool const ft4 = m_mode=="FT4";   // item 73: in FT4 the lamp reads the FT4 preset (letters F3PROM, FT8's colour scheme)
+  bool const ft2 = m_mode=="FT2";    // CE3TSK step 5: and FT2's own in FT2
   auto const p4 = ft4_preset_of (currentFT4Recipe (), ft4Threads());
+  auto const p2 = ft2_preset_of (m_ft2Recipe, ft4Threads());
   ui->labelPreset->setAutoFillBackground(true);
-  ui->labelPreset->setEnabled(ft8 || ft4);
-  if (ft4) ui->labelPreset->setText(p4==FT4Preset::Custom ? QString("Custom") : QString("Preset %1").arg(QChar(ft4_preset_letter(p4))));
+  ui->labelPreset->setEnabled(ft8 || ft4 || ft2);
+  if (ft2) ui->labelPreset->setText(p2==FT2Preset::Custom ? QString("Custom") : QString("Preset %1").arg(QChar(ft2_preset_letter(p2))));
+  else if (ft4) ui->labelPreset->setText(p4==FT4Preset::Custom ? QString("Custom") : QString("Preset %1").arg(QChar(ft4_preset_letter(p4))));
   else ui->labelPreset->setText(p==DecodePreset::Custom ? QString("Custom") : QString("Preset %1").arg(QChar(preset_letter(p))));   // the C of the table is never shown
-  auto const c = ft8 ? preset_colour(p) : ft4 ? ft4_preset_colour(p4) : nullptr;
+  auto const c = ft8 ? preset_colour(p) : ft4 ? ft4_preset_colour(p4) : ft2 ? ft2_preset_colour(p2) : nullptr;   // CE3TSK step 5: FT2's tier colours its lamp too
   if (c) {
     QColor const bg(c);
     ui->labelPreset->setStyleSheet(QString("QLabel{color: %1; background: %2; border: 1px solid %3; border-radius: 3px; padding: 1px 4px}")
@@ -4613,12 +5122,15 @@ void MainWindow::refreshDecodePreset()
                             nullptr /* Ensemble: recipe kept, menu entry removed 2026-09-05 */, ui->actionFT8PresetPipeline, ui->actionFT8PresetPipelineFull, ui->actionFT8PresetPipelineRun};
   QAction* const names4[] = {ui->actionFT4PresetFast, ui->actionFT4PresetDefault, ui->actionFT4PresetBestPower,
                              ui->actionFT4PresetRecommended, ui->actionFT4PresetMaxDecodes, ui->actionFT4PresetMaxEffort};
+  QAction* const names2[] = {ui->actionFT2PresetFast, ui->actionFT2PresetDefault,
+                             ui->actionFT2PresetRecommended, ui->actionFT2PresetMaxEffort};   // CE3TSK step 5
   /* CE3TSK: the four fallbacks are translated too - every other branch hands over an action's
      text, which the catalogues already carry, so these were the last English left on the lamp.
      "Custom" itself stays the English word in every language: it is what the lamp reads, and the
      lamp's own tooltip quotes it verbatim in all 20 catalogues. */
-  ui->labelPreset->setToolTip(wrap_tooltip(ft4 ? (p4==FT4Preset::Custom ? tr("Custom - the FT4 RX / TX background controls match no preset") : names4[static_cast<int>(p4)]->text())
-                              : !ft8 ? tr("FT8 / FT4 decoding preset - greyed while the mode is neither")
+  ui->labelPreset->setToolTip(wrap_tooltip(ft2 ? (p2==FT2Preset::Custom ? tr("Custom - the FT2 RX / TX background controls match no preset") : names2[static_cast<int>(p2)]->text())
+                              : ft4 ? (p4==FT4Preset::Custom ? tr("Custom - the FT4 RX / TX background controls match no preset") : names4[static_cast<int>(p4)]->text())
+                              : !ft8 ? tr("FT* decoding preset - greyed while the mode is none of them")
                               : p==DecodePreset::Custom ? tr("Custom - the RX / TX background controls match no preset")
                               : !names[static_cast<int>(p)] ? tr("ensemble - the RX-only recipe of the former Ensemble preset (no menu entry)") : names[static_cast<int>(p)]->text()));
 }
@@ -4848,7 +5360,7 @@ void MainWindow::decode()                                       //decode()
   dec_data.params.nft8cycles=m_nFT8Cycles;
   dec_data.params.nft8swlcycles=m_nFT8SWLCycles;
   if(m_houndMode) { dec_data.params.nft8rxfsens=1; } else { dec_data.params.nft8rxfsens=m_nFT8RXfSens; }
-  dec_data.params.nft4depth=m_nFT4depth;
+  dec_data.params.nft4depth=(m_mode=="FT2") ? m_ft2Recipe.depth : m_nFT4depth;   // CE3TSK step 5
   if(m_ft8Sensitivity==0) dec_data.params.lft8lowth=false;
   else  dec_data.params.lft8lowth=true;
   if(m_ft8Sensitivity==2) dec_data.params.lft8subpass=true;
@@ -4872,28 +5384,34 @@ void MainWindow::decode()                                       //decode()
   dec_data.params.lft8deeposd=m_ft8DeepOSD ? 1 : 0;   // CE3TSK: OSD order 2 for every candidate
   dec_data.params.lft8twopass=m_ft8TwoSlicings ? 1 : 0;   // CE3TSK: second slicing pass
   dec_data.params.lft8altpass=m_ft8AltPass ? 1 : 0;   // CE3TSK: alternate-approach pass
-  dec_data.params.lft4altpass=m_ft4AltPass ? 1 : 0;   // CE3TSK: FT4 expert
-  dec_data.params.lft4deeposd=m_ft4DeepOSD ? 1 : 0;   // CE3TSK item 58
-  dec_data.params.nft4bgensemble=ft4_bg_effort_members(m_ft4BgEnsemble, ft4Threads());   // CE3TSK items 59/73: the target, auto resolved here
-  dec_data.params.nft4bgeffort=(m_mode=="FT4" && m_ft4BgEnabled) ? 1 : 0;   // CE3TSK item 78: the switch, sent as FT8's nft8bgeffort is - it alone decides whether the phase runs
-  dec_data.params.nft4bgdepth=m_ft4BgDepth;   // CE3TSK item 69
-  dec_data.params.lft4bgdeeposd=m_ft4BgDeepOSD ? 1 : 0;
-  dec_data.params.lft4bgaltpass=m_ft4BgAltPass ? 1 : 0;
-  dec_data.params.lft4bgtwopass=m_ft4BgTwoSlicings ? 1 : 0;
-  dec_data.params.lft4bgresidual=m_ft4BgResidual ? 1 : 0;   // CE3TSK item 72
-  dec_data.params.nft4sens=m_ft4Sens;
-  dec_data.params.nft4bgsens=m_ft4BgSens;   // CE3TSK item 73
-  dec_data.params.nft4rxfsens=m_ft4RXfSens;   // CE3TSK item 75
-  dec_data.params.nft4bgrxfsens=m_ft4BgRXfSens;
-  dec_data.params.nft4ensemble=ft4_effort_members(m_ft4Ensemble, ft4Threads());   // item 73
-  dec_data.params.lft4twopass=m_ft4TwoSlicings;
+  /* CE3TSK step 5: FT2 shares every one of these fields with FT4 - it is the same decoder - but
+     carries its OWN values, so the recipe that fills them is the active mode's. */
+  FT4Recipe const fr = (m_mode=="FT2") ? m_ft2Recipe : currentFT4Recipe();
+  dec_data.params.lft4altpass=fr.alt ? 1 : 0;   // CE3TSK: FT4 expert
+  dec_data.params.lft4deeposd=fr.deeposd ? 1 : 0;   // CE3TSK item 58
+  dec_data.params.nft4bgensemble=ft4_bg_effort_members(fr.bg, ft4Threads());   // CE3TSK items 59/73: the target, auto resolved here
+  dec_data.params.nft4bgeffort=((m_mode=="FT4" || m_mode=="FT2") && fr.bgon) ? 1 : 0;   // CE3TSK item 78: the switch, sent as FT8's nft8bgeffort is - it alone decides whether the phase runs
+  dec_data.params.nft4bgdepth=fr.bgdepth;   // CE3TSK item 69
+  dec_data.params.lft4bgdeeposd=fr.bgdeeposd ? 1 : 0;
+  dec_data.params.lft4bgaltpass=fr.bgalt ? 1 : 0;
+  dec_data.params.lft4bgtwopass=fr.bgtwopass ? 1 : 0;
+  dec_data.params.lft4bgresidual=fr.bgresidual ? 1 : 0;   // CE3TSK item 72
+  dec_data.params.nft4sens=fr.sens;
+  dec_data.params.nft4bgsens=fr.bgsens;   // CE3TSK item 73
+  dec_data.params.nft4rxfsens=fr.rxf;   // CE3TSK item 75
+  dec_data.params.nft4bgrxfsens=fr.bgrxf;
+  dec_data.params.nft4ensemble=ft4_effort_members(fr.members, ft4Threads());   // item 73
+  dec_data.params.lft4twopass=fr.twopass;
   dec_data.params.nft8ensemble=ensemble_effort_members(m_ft8EnsembleEffort, effective_ft8_threads(m_ft8threads, QThread::idealThreadCount()));   // CE3TSK (P8: budget auto passes -2 through)
-  dec_data.params.nrxbudget=(m_mode=="FT4") ? m_ft4RXBudget : m_ft8RXBudget;   // CE3TSK P8; item 80: FT4's own budget
+  /* CE3TSK: FT2 has a 0.58 s reply deadline, so FT8's 2.7 s budget would never bite; until FT2
+     gets its own setting (step 5 of the port) it uses the same 5 tenths file mode gives it. */
+  dec_data.params.nrxbudget=(m_mode=="FT4") ? m_ft4RXBudget : (m_mode=="FT2") ? m_ft2RXBudget : m_ft8RXBudget;   // CE3TSK P8; item 80: FT4's own budget, step 5: FT2's own
   dec_data.params.nft8bgeffort=(m_mode=="FT8" && m_bgEnabled) ? 1 : 0;   // CE3TSK: the TX background phase (pipeline ensemble)
-  dec_data.params.nbgmargin=(m_mode=="FT4") ? m_ft4BgMargin : m_ft8BackgroundMargin;   // item 80: FT4's own margin
+  dec_data.params.nbgmargin=(m_mode=="FT4") ? m_ft4BgMargin : (m_mode=="FT2") ? m_ft2BgMargin : m_ft8BackgroundMargin;   // item 80: FT4's own margin, step 5: FT2's own
   {   // CE3TSK P7: two periods of background when TX is enabled and the coming period is ours
     int const thisPeriod = period_index_of_trigger (0.001 * (m_jtdxtime->currentMSecsSinceEpoch2 () % 86400000), m_TRperiod);
-    bool const bgmode = (m_mode=="FT8" && m_bgEnabled) || (m_mode=="FT4" && m_ft4BgEnabled);   // item 80: the two-period window reaches FT4's background too
+    bool const bgmode = (m_mode=="FT8" && m_bgEnabled) || (m_mode=="FT4" && m_ft4BgEnabled)
+                        || (m_mode=="FT2" && m_ft2Recipe.bgon);   // item 80: the two-period window reaches FT4's background too; step 5: FT2's
     dec_data.params.nbgbudget = background_budget_tenths (m_enableTx && !m_diskData && bgmode, tx_period_next (m_txFirst, thisPeriod), m_TRperiod,
                                                           m_diskData && bgmode);   // a replay gets the full window: the whole unit list, 100 on the benchmark
   }
@@ -4937,6 +5455,10 @@ void MainWindow::decode()                                       //decode()
   
   if(m_mode=="FT8") dec_data.params.nmode=8;
   else if(m_mode=="FT4") dec_data.params.nmode=4;
+  /* CE3TSK: FT2 rides the FT4 decoder - nmode 52 tells decoder.f90 to stretch the period x2 and
+     halve the frequency limits. It carries FT2's settings in FT4's own parameter fields, which is
+     why the shared block did not have to grow; the two modes never decode at the same time. */
+  else if(m_mode=="FT2") dec_data.params.nmode=52;
   else if(m_mode=="JT9+JT65") dec_data.params.nmode=9+65;
   else if(m_mode=="JT9") dec_data.params.nmode=9;
   else if(m_mode=="JT65") dec_data.params.nmode=65;
@@ -5352,6 +5874,7 @@ void MainWindow::readFromStdout()                             //readFromStdout
     // autoseq guard frequency band
       if(m_modeTx == "FT8") m_nguardfreq = 51;
       else if(m_modeTx == "FT4") m_nguardfreq = 84;
+      else if(m_modeTx == "FT2") m_nguardfreq = 168;   // CE3TSK: 4 tones at 41.667 Hz, twice FT4's width
       else if(m_modeTx == "JT65") m_nguardfreq = 176;
       else if(m_modeTx == "JT9") m_nguardfreq = 16;
       else if(m_modeTx == "T10") m_nguardfreq = 67;
@@ -5366,7 +5889,9 @@ void MainWindow::readFromStdout()                             //readFromStdout
       m_notified=false;
       if(m_config.write_decoded_debug()) {
         QString rxm{""};
-        if((m_mode=="FT8" && m_ft8EnsembleEffort==ENSEMBLE_BUDGET) || (m_mode=="FT4" && m_ft4Ensemble==FT4_ENSEMBLE_BUDGET)) { int i=t.indexOf("<rxm>"); if(i>=0) rxm=" - RX budget auto: "+t.mid(i+5,3).trimmed()+" member(s)"; }   // CE3TSK P8; item 80 FT4
+        if((m_mode=="FT8" && m_ft8EnsembleEffort==ENSEMBLE_BUDGET) || (m_mode=="FT4" && m_ft4Ensemble==FT4_ENSEMBLE_BUDGET)
+           || (m_mode=="FT2" && m_ft2Recipe.members==FT4_ENSEMBLE_BUDGET)) {   // CE3TSK step 5: FT2's max effort uses it too
+          int i=t.indexOf("<rxm>"); if(i>=0) rxm=" - RX budget auto: "+t.mid(i+5,3).trimmed()+" member(s)"; }   // CE3TSK P8; item 80 FT4
         writeToALLTXT("Decoding finished"+rxm);
       }
       QString slag="";
@@ -5404,14 +5929,15 @@ void MainWindow::readFromStdout()                             //readFromStdout
            <BackgroundFinished> line, which re-arms the spacer) will come. Until item 78 the FT4
            decoder ran the phase only when the member target exceeded the RX count, and this
            flag had to copy that rule or every later separator was swallowed. */
-        m_bgPhase=((m_mode=="FT8" && m_bgEnabled) || (m_mode=="FT4" && m_ft4BgEnabled));
+        m_bgPhase=((m_mode=="FT8" && m_bgEnabled) || (m_mode=="FT4" && m_ft4BgEnabled)
+                   || (m_mode=="FT2" && m_ft2Recipe.bgon));   // CE3TSK step 5
         updateDecodeLabel();
         updateTimingLamps();   // CE3TSK
         if(m_mode=="FT8") {
           if(!m_lostaudio) {
-            if(navexdt<76) ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#fdedc5",m_useDarkStyle)));
-            else if(navexdt>75 && navexdt<151) ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ffff00",m_useDarkStyle)));
-            else if(navexdt>150) ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ff8000",m_useDarkStyle)));
+            if(navexdt<76) setBandLabelColour ("#fdedc5");
+            else if(navexdt>75 && navexdt<151) setBandLabelColour ("#ffff00");
+            else if(navexdt>150) setBandLabelColour ("#ff8000");
             if(navexdt>75) ui->label_6->setText(tr("check time"));
             else  ui->label_6->setText(tr("Band"));
           }
@@ -5422,10 +5948,17 @@ void MainWindow::readFromStdout()                             //readFromStdout
           } else if (!ui->syncButton->isEnabled()) ui->syncButton->setEnabled(true);
         }
         else if (m_mode=="FT4") {
-          if(navexdt<41) ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#fdedc5",m_useDarkStyle)));
-          else if(navexdt>40 && navexdt<81) ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ffff00",m_useDarkStyle)));
-          else if(navexdt>80) ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ff8000",m_useDarkStyle)));
+          if(navexdt<41) setBandLabelColour ("#fdedc5");
+          else if(navexdt>40 && navexdt<81) setBandLabelColour ("#ffff00");
+          else if(navexdt>80) setBandLabelColour ("#ff8000");
           if(navexdt>40) ui->label_6->setText(tr("check time"));
+          else  ui->label_6->setText(tr("Band"));
+        }
+        else if (m_mode=="FT2") {   // CE3TSK: half FT4's thresholds, for half its period
+          if(navexdt<21) setBandLabelColour ("#fdedc5");
+          else if(navexdt>20 && navexdt<41) setBandLabelColour ("#ffff00");
+          else if(navexdt>40) setBandLabelColour ("#ff8000");
+          if(navexdt>20) ui->label_6->setText(tr("check time"));
           else  ui->label_6->setText(tr("Band"));
         }
       }
@@ -5515,7 +6048,8 @@ void MainWindow::readFromStdout()                             //readFromStdout
             QString band;
             if (m_jtdxtime->currentMSecsSinceEpoch2() / 1000 - m_secBandChanged > 50 
 			|| (m_jtdxtime->currentMSecsSinceEpoch2() / 1000 - m_secBandChanged > 14 && m_mode == "FT8")
-			|| (m_jtdxtime->currentMSecsSinceEpoch2() / 1000 - m_secBandChanged > 6 && m_mode == "FT4"))
+			|| (m_jtdxtime->currentMSecsSinceEpoch2() / 1000 - m_secBandChanged > 6 && m_mode == "FT4")
+			|| (m_jtdxtime->currentMSecsSinceEpoch2() / 1000 - m_secBandChanged > 3 && m_mode == "FT2"))   // CE3TSK
               {
                 band = ' ' + m_config.bands ()->find (m_freqNominal) + ' ';
               }
@@ -5697,6 +6231,7 @@ void MainWindow::readFromStdout()                             //readFromStdout
       if(m_okToPost and m_config.spot_to_psk_reporter () and stdMsg and !m_diskData) {
         QString msgmode="FT8";
         if (m_mode=="FT4") msgmode="FT4";
+        else if (m_mode=="FT2") msgmode="FT2";   // CE3TSK
         else if (decodedtext.isJT65()) msgmode="JT65";
         else if (m_mode.startsWith("JT9")) msgmode="JT9";
         else if (m_mode=="T10") msgmode="T10";
@@ -5728,13 +6263,22 @@ void MainWindow::killFile ()
       if(f2.exists()) f2.remove();
     }
   }
+  initLogIfNeeded ();
+}
+
+/* CE3TSK: the log initialisation a changed wsjtx_log.adi or a data file download left pending.
+   Called at the end of the period and when the operator stops monitoring, which has no period
+   left to protect - without that a download made just before Stop waited until the next close. */
+void MainWindow::initLogIfNeeded ()
+{
   if(m_logInitNeeded) {
     printf("%s(%0.1f) Timing Log_init_needed\n",m_jtdxtime->currentDateTimeUtc2().toString("hh:mm:ss.zzz").toStdString().c_str(),m_jtdxtime->GetOffset());
-    if(m_config.write_decoded_debug()) writeToALLTXT("Log initialization is started: wsjtx_log.adi file was changed");
-    m_logBook.init(m_config.callNotif() ? m_config.my_callsign() : "",m_config.gridNotif() ? m_config.my_grid() : "",m_config.timeFrom(),"wsjtx_log.adi");
+    if(m_config.write_decoded_debug()) writeToALLTXT(m_dataFilesChanged ? "Log initialization is started: cty.dat or the LoTW user list was downloaded" : "Log initialization is started: wsjtx_log.adi file was changed");
+    m_logBook.init(m_config.callNotif() ? m_config.my_callsign() : "",m_config.gridNotif() ? m_config.my_grid() : "",m_config.timeFrom(),"wsjtx_log.adi",nullptr,m_config.countryNameTranslated());
     refreshContestLog(true);   /* CE3TSK: country data has just been read */
     countQSOs ();
     m_logInitNeeded=false;
+    m_dataFilesChanged=false;
   }
 }
 
@@ -5844,6 +6388,7 @@ void MainWindow::guiUpdate()
   txDuration=0.0;
   if(m_modeTx=="FT8") txDuration=13.64; //1.0 + 79*1920/12000.0;
   else if(m_modeTx=="FT4")  txDuration=6.04; //1.0 + 105*576/12000.0;
+  else if(m_modeTx=="FT2")  txDuration=3.02; //0.5 + 105*288/12000.0 - CE3TSK step 6: 2.52 s of signal in a 3.75 s period, so the margin is half a second, not FT4's whole one
   else if(m_modeTx=="JT65") txDuration=47.81142857142857; //1.0 + 126*4096/11025.0;
   else if(m_modeTx=="JT9") txDuration=49.96; //1.0 + 85.0*m_nsps/12000.0;
   else if(m_modeTx=="T10") txDuration=49.96; //1.0 + 85.0*m_nsps/12000.0;
@@ -6054,6 +6599,16 @@ void MainWindow::guiUpdate()
         int ichk=0; char ft4msgbits[77]; int ntxhash=1;
         genft4_(message, &ichk, &ntxhash, msgsent, const_cast<char *> (ft4msgbits),const_cast<int *>(itone),37,37);
         int nsym=103; int nsps=4*576; float fsample=48000.0; float f0=ui->TxFreqSpinBox->value() - m_XIT; int nwave=(nsym+2)*nsps; int icmplx=0;
+        gen_ft4wave_(const_cast<int *>(itone),&nsym,&nsps,&fsample,&f0,foxcom_.wave,foxcom_.wave,&icmplx,&nwave);
+      }
+      /* CE3TSK step 6: FT2 transmits FT4's frame at twice the rate, so it is the SAME message
+         coding and the SAME waveform generator - only the symbol length changes, 288 samples at
+         12 kHz and so 4*288 at the 48 kHz transmit rate. 103 symbols plus the two ramp symbols
+         gen_ft4wave adds is the 105 of the frame. */
+      else if(m_modeTx=="FT2") {
+        int ichk=0; char ft4msgbits[77]; int ntxhash=1;
+        genft4_(message, &ichk, &ntxhash, msgsent, const_cast<char *> (ft4msgbits),const_cast<int *>(itone),37,37);
+        int nsym=103; int nsps=4*288; float fsample=48000.0; float f0=ui->TxFreqSpinBox->value() - m_XIT; int nwave=(nsym+2)*nsps; int icmplx=0;
         gen_ft4wave_(const_cast<int *>(itone),&nsym,&nsps,&fsample,&f0,foxcom_.wave,foxcom_.wave,&icmplx,&nwave);
       }
       else if(m_modeTx=="JT65") { gen65_(message, &ichk, msgsent, const_cast<int *> (itone), &m_currentMessageType, len1, len1); }
@@ -6315,26 +6870,24 @@ void MainWindow::guiUpdate()
         progressBar->setValue(0);
     }
 
-    QString cssSafe = QString("QProgressBar { border: 2px solid %1; border-radius: 5px; background: %2; text-align: center; } QProgressBar::chunk { background: %3; width: 1px; }").arg(Radio::convert_dark("#808080",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle),Radio::convert_dark("#00ff00",m_useDarkStyle));
-    QString cssTransmit = QString("QProgressBar { border: 2px solid %1; border-radius: 5px; background: %2; text-align: center; } QProgressBar::chunk { background: %3; width: 1px; }").arg(Radio::convert_dark("#808080",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle),Radio::convert_dark("#ff0000",m_useDarkStyle));
 
     if(m_transmitting) {
-      tx_status_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ffff33",m_useDarkStyle)));
+      setTxStatusColour ("#ffff33");
       if(m_tune) tx_status_label->setText(tr("Tx: TUNE"));
       else tx_status_label->setText(tr("Tx: ") + m_curMsgTx.trimmed());
-	  progressBar->setStyleSheet(cssTransmit);
+	  setProgressBarStyle ();
     } else if(m_monitoring) {
 	  if (!m_txwatchdog) {
-		tx_status_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#00ff00",m_useDarkStyle)));
+		setTxStatusColour ("#00ff00");
 		QString t=tr("Receiving ");
 		tx_status_label->setText(t);
 	  }
       transmitDisplay(false);
-      progressBar->setStyleSheet(cssSafe);
+      setProgressBarStyle ();
     } else if (!m_diskData && !m_txwatchdog) {
-      tx_status_label->setStyleSheet("");
+      setTxStatusColour ("");
       tx_status_label->setText("");
-      progressBar->setStyleSheet(cssSafe);
+      setProgressBarStyle ();
     }
     if(m_transmitting && !m_tune && (m_nseq==10 || m_nseq==11)) { m_lapmyc=1; m_mslastTX = m_jtdxtime->currentMSecsSinceEpoch2(); } //setting twice: make sure it is not skipped
     QDateTime tme = m_jtdxtime->currentDateTimeUtc2();
@@ -6349,9 +6902,7 @@ void MainWindow::guiUpdate()
 	// setting labUTC clock style at start
 	if(m_start) setClockStyle(true);
 	// setting labUTC clock style at operation
-	if ((m_mode=="FT8" && isecond%15==0) || 
-        (m_mode=="FT4" && (isecond%15==0 || isecond==8 || isecond==23 || isecond==38 || isecond==53)) ||
-        (!m_mode.startsWith("FT") && second=="00")) setClockStyle(false);
+	if (clock_refresh_due(m_mode,isecond)) setClockStyle(false);   // CE3TSK: modetiming.h
 	// setting band scheduler
 	if((minute.toInt())%5==0 && second == "01" && m_config.usesched() && !m_enableTx) {
         if (m_config.sched_hh_1() == hour && m_config.sched_mm_1() == minute) {
@@ -6378,7 +6929,7 @@ void MainWindow::guiUpdate()
     if (m_geometry_restored > 0) { m_geometry_restored -=1;
       /* CE3TSK: the delayed re-restore would undo the clamp applied at start-up */
       if (m_geometry_restored == 0) {
-        restoreGeometry (m_geometry); resize (size ().expandedTo (sizeHint ()));
+        restoreMainGeometry ();
         /* CE3TSK/qt6-port: WideGraph is hit by the exact same start-up clamping as this window
            - see WideGraph::reRestoreGeometry() - so give it the same delayed second chance,
            piggy-backing on this already-proven timer instead of adding a separate one there. */
@@ -6396,6 +6947,7 @@ void MainWindow::guiUpdate()
        real decode and still recover within seconds of a wedge. */
     quint64 timeout=120000;
     if(m_mode=="FT4") timeout=30000;
+    else if(m_mode=="FT2") timeout=15000;   // CE3TSK
     else if(m_mode=="FT8") timeout=60000;
     if(m_decoderBusy && m_msDecoderStarted>0 && !m_mode.startsWith("WSPR")
        && (m_jtdxtime->currentMSecsSinceEpoch2()-m_msDecoderStarted)>timeout) {
@@ -6425,6 +6977,7 @@ void MainWindow::set_scheduler(QString const& setto,bool mixed)
     newband=setto.mid(setto.indexOf(" ")+1,4);
     if (newband == "FT8") { on_actionFT8_triggered(); }
     else if (newband == "FT4") { on_actionFT4_triggered(); }
+    else if (newband == "FT2") { on_actionFT2_triggered(); }   // CE3TSK
     else if (newband == "JT65") { on_actionJT65_triggered(); }
 	else if (newband == "JT9") { on_actionJT9_triggered(); }
 	else if (newband == "T10") { on_actionT10_triggered(); }
@@ -6442,6 +6995,17 @@ void MainWindow::haltTxTuneTimer()
 {
   if(m_config.write_decoded_debug()) { writeToALLTXT("Halt Tx triggered: tuning stopped"); m_haltTxWritten=true; }
   on_stopTxButton_clicked();
+}
+
+/* CE3TSK: cty.dat or the LoTW user activity file was replaced from Settings. Reading both again
+   holds the GUI for about 2.7 s, so while monitoring or transmitting (a transmission turns
+   monitoring off) it waits in initLogIfNeeded(), the path a changed wsjtx_log.adi already takes;
+   otherwise there is no period to protect. */
+void MainWindow::dataFilesUpdated ()
+{
+  m_logInitNeeded = true;
+  m_dataFilesChanged = true;
+  if (!m_monitoring && !m_transmitting) initLogIfNeeded ();
 }
 
 void MainWindow::logChanged()
@@ -6525,7 +7089,7 @@ void MainWindow::stopTx()
   ui->TxFreqSpinBox->setDisabled(false);
   g_iptt=0;
   if (!m_txwatchdog) {
-	  tx_status_label->setStyleSheet("");
+	  setTxStatusColour ("");
 	  tx_status_label->setText("");
   }
   if (m_tci) ptt0Timer.start(0); else {
@@ -6662,7 +7226,8 @@ void MainWindow::on_txb6_clicked()                                //txb6
   if(!m_autoseq && m_wasAutoSeq) { m_wasAutoSeq=false; on_AutoSeqButton_clicked(true); }
   if (m_spotDXsummit){
      ui->pbSpotDXCall->setText(tr("DX Call"));
-     if(m_config.spot_to_dxsummit()) { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: 51;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#c4c4ff",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
+     m_dxCallHidden=false;   // CE3TSK
+     if(m_config.spot_to_dxsummit()) { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#c4c4ff",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
      else { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#aabec8",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
      m_spotDXsummit=false;
   }
@@ -6809,9 +7374,9 @@ void MainWindow::processMessage(QString const& messages, int position, bool alt,
                 {
                   ui->outAttenuation->setValue(m_pwrBandTxMemory[curBand].toInt());
                 }
-              else
+              else if (m_outAttenuationRestored)
                 {
-                  m_pwrBandTxMemory[curBand] = ui->outAttenuation->value();
+                  m_pwrBandTxMemory[curBand] = ui->outAttenuation->value();   /* CE3TSK: never the .ui default */
                 }
             }
           m_modeTx="JT9";
@@ -6828,9 +7393,9 @@ void MainWindow::processMessage(QString const& messages, int position, bool alt,
 //                  printf("auto mode changed %s JT65 %s:%d\n",m_mode.toStdString().c_str(),curBand.toStdString().c_str(),m_pwrBandTxMemory[curBand].toInt());
                   ui->outAttenuation->setValue(m_pwrBandTxMemory[curBand].toInt());
                 }
-              else
+              else if (m_outAttenuationRestored)
                 {
-                  m_pwrBandTxMemory[curBand] = ui->outAttenuation->value();
+                  m_pwrBandTxMemory[curBand] = ui->outAttenuation->value();   /* CE3TSK: never the .ui default */
                 }
             }
           m_modeTx="JT65";
@@ -6907,7 +7472,7 @@ void MainWindow::processMessage(QString const& messages, int position, bool alt,
       if (!m_hisGrid.isEmpty()) ui->dxGridEntry->clear();
       i1=m_qsoHistory.reset_count(hiscall);
       if (m_callToClipboard) clipboard->setText(hiscall);
-      ui->dxCallEntry->setText(hiscall); ui->dxCallEntry->setStyleSheet(QString("QLineEdit {color: %1; background: %2}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle)));
+      ui->dxCallEntry->setText(hiscall); setDxCallEntryColour ("#ffffff");
       call_changed = true;
       onCallPickedByHand (base_call);   /* CE3TSK: the operator's own choice overrides the policy */
       m_contestIgnore.remove (base_call);   /* CE3TSK: ... and the contest's report-message skip */
@@ -7113,7 +7678,7 @@ void MainWindow::genStdMsgs(QString rpt)                       //genStdMsgs()
   }
 
   QString hisCall=m_hisCall;
-  ui->dxCallEntry->setStyleSheet(QString("color: %1; background: %2").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle)));
+  setDxCallEntryColour ("#ffffff");
 
   if(hisCall.isEmpty ()) {
     ui->labAz->setText("");
@@ -7323,7 +7888,7 @@ void MainWindow::TxAgain() { enableTx_mode(true); }
    what the other waits for, so the QSO is over. Back to CQ if it was the station in the DX
    field, and skipped by the autoselect for five minutes either way - without that he would
    be picked again immediately, calling us being the highest priority there is. A double
-   click on him overrules this, as it overrules the finished-caller guard. */
+   click on him overrules this. */
 void MainWindow::contestReportAbort (QString const& call)
 {
   QString const base = Radio::base_callsign (call);
@@ -7388,6 +7953,7 @@ void MainWindow::clearDX (QString reason)
      ui->pbSpotDXCall->setText(tr("DX Call"));
      m_spotDXsummit=false;
   }    
+  m_dxCallHidden=false;   // CE3TSK
   if(m_config.spot_to_dxsummit()) { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#c4c4ff",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
   else { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#aabec8",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
 
@@ -7400,7 +7966,7 @@ void MainWindow::clearDXfields (QString reason)
   QString dxcallclr=m_hisCall;
   if (!m_hisCall.isEmpty()) ui->dxCallEntry->clear();
   if (!m_hisGrid.isEmpty()) ui->dxGridEntry->clear();
-  ui->dxCallEntry->setStyleSheet(QString("QLineEdit {color: %1; background: %2}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle)));
+  setDxCallEntryColour ("#ffffff");
   if(!reason.isEmpty() && m_config.write_decoded_debug()) writeToALLTXT("DX Call " + dxcallclr + reason);
 }
 
@@ -7424,6 +7990,7 @@ void MainWindow::countQSOs ()
   char c_txt [20];
   if (m_mode == "FT8") { sprintf(c_txt,"FT8  %d",book.get_qso_count("FT8")); }
   else if (m_mode == "FT4") { sprintf(c_txt,"FT4  %d",book.get_qso_count("FT4")); }
+  else if (m_mode == "FT2") { sprintf(c_txt,"FT2  %d",book.get_qso_count("FT2")); }   // CE3TSK
   else if (m_mode == "JT9+JT65") { sprintf(c_txt,"JT65/9 %d/%d",book.get_qso_count("JT65"),book.get_qso_count("JT9")); }
   else if (m_mode == "JT9") { sprintf(c_txt,"JT9  %d",book.get_qso_count("JT9")); }
   else if (m_mode == "JT65") { sprintf(c_txt,"JT65  %d",book.get_qso_count("JT65")); }
@@ -7772,7 +8339,7 @@ void MainWindow::on_dxCallEntry_textChanged(const QString &t) //dxCall changed
           } else {
              m_name = "";
           }
-      ui->dxCallEntry->setStyleSheet(QString("QLineEdit {color: %1; background: %2}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle)));
+      setDxCallEntryColour ("#ffffff");
       if (logClearDXTimer.isActive()) logClearDXTimer.stop();
       // Refresh Tx macros
       QStringListModel* model1 = m_config.macros();
@@ -7794,6 +8361,7 @@ void MainWindow::on_dxCallEntry_textChanged(const QString &t) //dxCall changed
          ui->pbSpotDXCall->setText(tr("DX Call"));
          m_spotDXsummit=false;
       }
+      m_dxCallHidden=false;   // CE3TSK
       if(m_config.spot_to_dxsummit()) { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#c4c4ff",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
       else { ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#aabec8",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
       m_bHisCallStd=stdCall(m_hisCall);
@@ -7868,6 +8436,7 @@ void MainWindow::on_logQSOButton_clicked()
   if (!m_houndMode && (m_config.prompt_to_log() || m_config.autolog())) {
     if(m_mode == "FT8") dateTimeQSOOff = currenttime.addSecs (14);
     else if(m_mode == "FT4") dateTimeQSOOff = currenttime.addSecs (7);
+    else if(m_mode == "FT2") dateTimeQSOOff = currenttime.addSecs (3);   // CE3TSK
     else dateTimeQSOOff = currenttime.addSecs (50);
   }
   if (dateTimeQSOOff < m_dateTimeQSOOn) m_dateTimeQSOOn = dateTimeQSOOff;
@@ -7927,7 +8496,7 @@ void MainWindow::acceptQSO2(QDateTime const& QSO_date_off, QString const& call, 
   }
   if (m_config.send_to_eqsl())
       Eqsl->upload(m_config.eqsl_username(),m_config.eqsl_passwd(),m_config.eqsl_nickname(),call,mode,QSO_date_on,rpt_sent,m_config.bands ()->find (dial_freq),eqslcomments);
-  ui->dxCallEntry->setStyleSheet(QString("QLineEdit {color: %1; background: %2}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#7fff7f",m_useDarkStyle)));
+  setDxCallEntryColour ("#7fff7f");
   m_lastloggedcall=call;
   m_lastloggedtime=m_jtdxtime->currentDateTimeUtc2();
   if (m_config.clear_DX () && !logClearDXTimer.isActive() && !m_autoTx && !m_autoseq) logClearDXTimer.start ((qAbs(int(m_TRperiod)-m_nseq))*1000);
@@ -7951,7 +8520,7 @@ void MainWindow::acceptQSO2(QDateTime const& QSO_date_off, QString const& call, 
       m_wantedGridList.removeAt(wgrididx); ui->wantedGrid->setText(m_wantedGridList.join(","));
     }
   }
-  if (m_houndMode && !m_hisCall.isEmpty()) { clearDX (" cleared: QSO logged in DXpedition mode"); ui->dxCallEntry->setStyleSheet(QString("QLineEdit {color: %1; background: %2}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ffffff",m_useDarkStyle))); }
+  if (m_houndMode && !m_hisCall.isEmpty()) { clearDX (" cleared: QSO logged in DXpedition mode"); setDxCallEntryColour ("#ffffff"); }
 }
 
 void MainWindow::on_actionJT9_triggered()
@@ -7962,7 +8531,7 @@ void MainWindow::on_actionJT9_triggered()
   switch_mode (Modes::JT9);
   if(m_modeTx!="JT9") on_pbTxMode_clicked();
   m_hsymStop=173; if(m_config.decode_at_52s()) m_hsymStop=179;
-  mode_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ff99cc",m_useDarkStyle)));
+  setModeLabelStyle ("JT9");
   ui->actionJT9->setChecked(true);
   ui->pbTxMode->setText("Tx JT9  @");
   ui->pbTxMode->setEnabled(false);
@@ -7979,7 +8548,7 @@ void MainWindow::on_actionT10_triggered()
   switch_mode (Modes::T10);
   m_modeTx="T10";
   m_hsymStop=173; if(m_config.decode_at_52s()) m_hsymStop=179;
-  mode_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#aaffff",m_useDarkStyle)));
+  setModeLabelStyle ("T10");
   ui->actionT10->setChecked(true);
   ui->pbTxMode->setText("Tx T10  +");
   ui->pbTxMode->setEnabled(false);
@@ -7996,12 +8565,36 @@ void MainWindow::on_actionFT4_triggered()
   switch_mode (Modes::FT4);
   m_modeTx="FT4";
   m_hsymStop=21;
-  mode_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#a99ee2",m_useDarkStyle))); //to be changed
+  setModeLabelStyle ("FT4"); //to be changed
   ui->actionFT4->setChecked(true);
   ui->pbTxMode->setText("Tx FT4 :");
   ui->pbTxMode->setEnabled(false);
   on_AutoSeqButton_clicked(true);
   m_TRperiod=7.5;
+  if(!m_hint) ui->hintButton->click();
+  commonActions();
+  enableHoundAccess(false);
+}
+
+/* CE3TSK: FT2 - FT4's frame at twice the rate, 3.75 s periods. The decoder reaches it through
+   nmode 52 and does the work in the FT4 chain (decoder.f90, which stretches the period x2), and
+   since step 6 it transmits as well: the same genft4 coding and gen_ft4wave waveform as FT4, at
+   288 samples per symbol, started 150 ms into the period - the instant WSJT-X improved's own FT2
+   transmitter uses (Modulator.cpp, `if(mode=="FT2") delay_ms=150;`), verified against its source. */
+void MainWindow::on_actionFT2_triggered()
+{
+  if (m_mode=="WSPR-2") killFile();
+  m_mode="FT2";
+  WSPR_config(false);
+  switch_mode (Modes::FT2);
+  m_modeTx="FT2";
+  m_hsymStop=22;                 // 22*1728 = 38016 samples, the 36864 the decoder stretches plus a margin
+  setModeLabelStyle ("FT2");
+  ui->actionFT2->setChecked(true);
+  ui->pbTxMode->setText("Tx FT2 ;");
+  ui->pbTxMode->setEnabled(false);
+  on_AutoSeqButton_clicked(true);
+  m_TRperiod=3.75;
   if(!m_hint) ui->hintButton->click();
   commonActions();
   enableHoundAccess(false);
@@ -8015,7 +8608,7 @@ void MainWindow::on_actionFT8_triggered()
   switch_mode (Modes::FT8);
   m_modeTx="FT8";
   m_hsymStop=50;
-  mode_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#6699ff",m_useDarkStyle)));
+  setModeLabelStyle ("FT8");
   ui->actionFT8->setChecked(true);
   ui->pbTxMode->setText("Tx FT8 ~");
   ui->pbTxMode->setEnabled(false);
@@ -8044,7 +8637,7 @@ void MainWindow::on_actionJT65_triggered()
   if(m_modeTx!="JT65") on_pbTxMode_clicked();
   m_TRperiod=60.0;
   m_hsymStop=173; if(m_config.decode_at_52s()) m_hsymStop=179;
-  mode_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#66ff66",m_useDarkStyle)));
+  setModeLabelStyle ("JT65");
   ui->actionJT65->setChecked(true);
   ui->pbTxMode->setText("Tx JT65  #");
   ui->pbTxMode->setEnabled(false);
@@ -8062,7 +8655,7 @@ void MainWindow::on_actionJT9_JT65_triggered()
   m_modeTx="JT65";
   m_TRperiod=60.0;
   m_hsymStop=173; if(m_config.decode_at_52s()) m_hsymStop=179;
-  mode_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ffff66",m_useDarkStyle)));
+  setModeLabelStyle ("JT9+JT65");
   ui->actionJT9_JT65->setChecked(true);
   commonActions();
   enableHoundAccess(false);
@@ -8083,7 +8676,7 @@ void MainWindow::on_actionWSPR_2_triggered()
   else Q_EMIT FFTSize (m_FFTSize);
   m_hsymStop=396;
   m_toneSpacing=12000.0/8192.0;
-  mode_label->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#ff66ff",m_useDarkStyle)));
+  setModeLabelStyle ("WSPR-2");
   mode_label->setText(m_mode);
   ui->actionWSPR_2->setChecked(true);
   m_wideGraph->setPeriod(m_TRperiod,m_nsps);
@@ -8139,6 +8732,7 @@ void MainWindow::commonActions ()
 //  m_modulator->setPeriod(m_TRperiod); // TODO - not thread safe
 //  m_detector->setPeriod(m_TRperiod);   // TODO - not thread safe
   m_nsps=6912;                   //For symspec only
+  if (m_mode=="FT2") m_nsps=3456;   // CE3TSK: half the block, so the waterfall keeps its rate in a half-length period
   m_FFTSize = m_nsps / 2;
   if (m_tci) Q_EMIT m_config.transceiver_blocksize(m_FFTSize);
   else Q_EMIT FFTSize (m_FFTSize);
@@ -8151,7 +8745,7 @@ void MainWindow::commonActions ()
   if (m_mode.startsWith("FT")) t = "UTC     dB   DT "+tr("Freq   Message");
   else t = "UTC   dB   DT "+tr("Freq   Message");
   ui->decodedTextLabel->setTextFormat(Qt::PlainText); ui->decodedTextLabel->setText(t);
-  ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#fdedc5",m_useDarkStyle)));
+  setBandLabelColour ("#fdedc5");
   ui->label_6->setText(tr("Band"));
   ui->decodedTextLabel2->setText(t);
   m_wideGraph->setPeriod(m_TRperiod,m_nsps);
@@ -8166,7 +8760,7 @@ void MainWindow::commonActions ()
   progressBar->setFormat("%v/"+QString::number(m_TRperiod));
   statusChanged();
   on_spotLineEdit_textChanged(ui->spotLineEdit->text());
-  if(m_mode=="FT4") {
+  if(m_mode=="FT4" || m_mode=="FT2") {   // CE3TSK: FT2 has FT4's message set and hint memory
     if(m_rrr) { m_savedRRR=m_rrr; ui->rrrCheckBox->click(); }
     ui->rrrCheckBox->setEnabled(false); ui->rrr1CheckBox->setEnabled(false);
     if(!m_hint) ui->hintButton->click();
@@ -8218,7 +8812,7 @@ void MainWindow::WSPR_config(bool b)
   ui->syncButton->setEnabled(!b); ui->syncButton->setVisible(!b);
   if(b) {
     ui->decodedTextLabel->setTextFormat(Qt::PlainText); ui->decodedTextLabel->setText("UTC    dB   DT "+tr("    Freq     Drift  Call          Grid    dBm   Dist"));
-    ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#fdedc5",m_useDarkStyle)));
+    setBandLabelColour ("#fdedc5");
     ui->label_6->setText(tr("Band"));
     if (m_config.is_transceiver_online ()) {
       Q_EMIT m_config.transceiver_tx_frequency (0); // turn off split
@@ -8229,7 +8823,7 @@ void MainWindow::WSPR_config(bool b)
     if (m_mode.startsWith("FT")) t = "UTC     dB   DT "+tr("Freq   Message");
     else t = "UTC   dB   DT "+tr("Freq   Message");
     ui->decodedTextLabel->setTextFormat(Qt::PlainText); ui->decodedTextLabel->setText(t);
-    ui->label_6->setStyleSheet(QString("QLabel{background: %1}").arg(Radio::convert_dark("#fdedc5",m_useDarkStyle)));
+    setBandLabelColour ("#fdedc5");
     ui->label_6->setText(tr("Band"));
     m_bSimplex = false;
   }
@@ -8434,6 +9028,7 @@ void MainWindow::on_bandComboBox_activated (int index)
 
 void MainWindow::band_changed (Frequency f)
 {
+  m_dialWheelTimer.stop (); m_dialWheelClock.invalidate ();   // CE3TSK: any QSY ends a wheel burst, applyDialWheel () restarts the hold
   abortTxBackground("band change");   // CE3TSK
   if (m_bandEdited) {
     if (!m_mode.startsWith ("WSPR")) { // band hopping preserves auto Tx
@@ -8468,15 +9063,15 @@ void MainWindow::band_changed (Frequency f)
     if(!m_transmitting && (oldband != newband || m_oldmode != m_mode) && m_rigOk && !m_config.rig_name().startsWith("None")) {
       m_bandChanged=true;
       qint64 ms = m_jtdxtime->currentMSecsSinceEpoch2() % 86400000; int nsec=ms/1000;
-      double TRperiod=60.0; // TR period is the only reliable way in this point of code at the mode change 
-      if(m_mode=="FT8") TRperiod=15.0;
-      else if(m_mode=="FT4") TRperiod=7.5;
+      // TR period is the only reliable way in this point of code at the mode change
+      double TRperiod=tr_period_of(m_mode);   // CE3TSK: modetiming.h - this chain used to forget FT2
       int nseqmod = fmod(double(nsec),TRperiod);
       m_nsecBandChanged=nseqmod;
     }
 
     m_freqNominal = f;
     m_freqTxNominal = m_freqNominal;
+    highlightBandButton ();   // CE3TSK
     setRig ();
     setXIT (ui->TxFreqSpinBox->value ());
     qint64 fDelta = m_lastDisplayFreq - m_freqNominal;
@@ -8543,16 +9138,17 @@ void MainWindow::band_changed (Frequency f)
 
 void MainWindow::enable_DXCC_entity ()
 {
-  if (m_mode.left(4)!="WSPR" && (m_callNotif != m_config.callNotif() || m_callsign != m_config.my_callsign() || m_gridNotif != m_config.gridNotif() || m_grid != m_config.my_grid() || m_timeFrom != m_config.timeFrom() || m_strictdirCQ != m_config.strictdirCQ())) {
-    if (m_callNotif != m_config.callNotif() || m_callsign != m_config.my_callsign() || m_gridNotif != m_config.gridNotif() || m_grid != m_config.my_grid() || m_timeFrom != m_config.timeFrom()) {
+  if (m_mode.left(4)!="WSPR" && (m_callNotif != m_config.callNotif() || m_callsign != m_config.my_callsign() || m_gridNotif != m_config.gridNotif() || m_grid != m_config.my_grid() || m_timeFrom != m_config.timeFrom() || m_countryNameTranslated != m_config.countryNameTranslated() || m_strictdirCQ != m_config.strictdirCQ())) {
+    if (m_callNotif != m_config.callNotif() || m_callsign != m_config.my_callsign() || m_gridNotif != m_config.gridNotif() || m_grid != m_config.my_grid() || m_timeFrom != m_config.timeFrom() || m_countryNameTranslated != m_config.countryNameTranslated()) {
       m_qsoHistory.init(); if(m_config.write_decoded_debug()) writeToALLTXT("QSO history initialized by enable_DXCC_entity");
-      m_logBook.init(m_config.callNotif() ? m_config.my_callsign() : "",m_config.gridNotif() ? m_config.my_grid() : "",m_config.timeFrom(),"wsjtx_log.adi");
+      m_logBook.init(m_config.callNotif() ? m_config.my_callsign() : "",m_config.gridNotif() ? m_config.my_grid() : "",m_config.timeFrom(),"wsjtx_log.adi",nullptr,m_config.countryNameTranslated());
       refreshContestLog(true);   /* CE3TSK: country data has just been read */
       m_callsign = m_config.my_callsign();
       m_grid = m_config.my_grid();
       m_callNotif = m_config.callNotif();
       m_gridNotif = m_config.gridNotif();
       m_timeFrom = m_config.timeFrom();
+      m_countryNameTranslated = m_config.countryNameTranslated();
     }
     QString countryName;
     m_logBook.getDXCC(m_config.my_callsign(),countryName);
@@ -8609,6 +9205,56 @@ void MainWindow::on_pbSendRRR_clicked()
 
 void MainWindow::resizeEvent(QResizeEvent *event) { 
   if(event->size().height() != event->oldSize().height()) dynamicButtonsInit(); 
+  /* CE3TSK: nothing to do here for the splitter - its share rides on stretch factors, which Qt
+     honours during the layout this resize triggers. Correcting the sizes from here was tried and
+     measured to do nothing: the layout runs afterwards and overwrites whatever is set. */
+}
+
+/* CE3TSK: the share is read once the window is up and laid out, and after that only the operator's
+   own drag changes it. It must NOT be read during a resize: by then Qt has already redistributed the
+   new width, so reading it there captures the drift and preserves THAT - measured 41.3 % becoming
+   48.5 % on the first widening and sticking. */
+void MainWindow::showEvent (QShowEvent *event)
+{
+  QMainWindow::showEvent (event);
+  if (!m_splitLearned) {
+    m_splitLearned = true;
+    QTimer::singleShot (0, this, [this] { rememberSplitRatio (); });
+  }
+}
+
+/* CE3TSK: the splitter keeps the share the operator gave it.
+ *
+ * QSplitter has no stretch factors here, so Qt hands new width to the panes by its own rule and the
+ * bar slides: measured, the left pane held 41.3 % of a 1000 px window and 47.8 % of a 1600 px one,
+ * the same either way whether the edge was dragged or the window resized in one step. Widening the
+ * window therefore meant dragging the bar back every time.
+ *
+ * So the ratio is remembered whenever the operator moves the handle - that is the only thing that
+ * should change it - and re-applied whenever the window's WIDTH changes. setSizes respects each
+ * pane's minimum, so a window too narrow for the right-hand controls still gives them their hint
+ * rather than the ratio; the ratio is restored as soon as there is room again. */
+void MainWindow::rememberSplitRatio ()
+{
+  auto const s = ui->splitter->sizes ();
+  if (s.size () != 2 || s[0] <= 0 || s[1] <= 0) return;
+  m_splitRatio = double (s[0]) / (s[0] + s[1]);
+  keepSplitRatio ();
+}
+
+/* The share is expressed to Qt as STRETCH FACTORS rather than corrected afterwards. Qt divides new
+   width between the panes in proportion to these, so the panes grow and shrink together and no
+   correction has to race the layout - which is what three earlier attempts did, each one measurably
+   losing to it. Widths beyond a pane's own minimum or maximum are still Qt's to clamp: the
+   right-hand controls keep their minimum on a narrow window, and the ratio returns as soon as there
+   is room for it. */
+void MainWindow::keepSplitRatio ()
+{
+  if (m_splitRatio <= 0.0 || m_splitRatio >= 1.0) return;
+  m_splitApplying = true;
+  ui->splitter->setStretchFactor (0, qRound (1000.0 * m_splitRatio));
+  ui->splitter->setStretchFactor (1, qRound (1000.0 * (1.0 - m_splitRatio)));
+  m_splitApplying = false;
 }
 
 void MainWindow::mousePressEvent(QMouseEvent *event)             //mousePressEvent
@@ -8648,7 +9294,7 @@ void MainWindow::mousePressEvent(QMouseEvent *event)             //mousePressEve
     QString basecall = Radio::base_callsign (m_hisCall);
     if(basecall.length () > 2) {
         m_config.add_callsign_hideFilter (basecall);
-        ui->pbSpotDXCall->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: outset;border-width: 1px;border-color: %3;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#00ff00",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle)));
+        m_dxCallHidden=true; setSpotButtonStyle ();   // CE3TSK: remembered so a style switch keeps it
     }
   }
 }
@@ -8762,8 +9408,14 @@ void MainWindow::on_tuneButton_clicked (bool checked)
   if (m_mode == "JT9+JT65" && m_modeTx == "JT65") { curBand = ui->bandComboBox->currentText()+m_modeTx; }
   else { curBand = ui->bandComboBox->currentText()+m_mode; }
   if (checked && m_tune==false) { // we're starting tuning so remember Tx and change pwr to Tune value
+    /* CE3TSK: what the slider held before the tune, so the end of the tune can come back to it
+       even on a band that has nothing remembered - otherwise the operator is left transmitting
+       at tune drive. */
+    m_outAttenuationPreTune = ui->outAttenuation->value();
     if (m_config.pwrBandTuneMemory ()) {
-      m_pwrBandTxMemory[curBand] = ui->outAttenuation->value(); // remember our Tx pwr
+      /* CE3TSK: only record a band once the slider holds a real value, never the .ui default -
+         the guard every power-memory write carries. */
+      if (m_outAttenuationRestored) m_pwrBandTxMemory[curBand] = ui->outAttenuation->value(); // remember our Tx pwr
       if (m_pwrBandTuneMemory.contains(curBand)) {
         m_PwrBandSetOK = false;
         ui->outAttenuation->setValue(m_pwrBandTuneMemory[curBand].toInt()); // set to Tune pwr
@@ -8772,11 +9424,19 @@ void MainWindow::on_tuneButton_clicked (bool checked)
     }
   } else { // we're turning off so remember our Tune pwr setting and reset to Tx pwr
 	if (m_config.pwrBandTuneMemory() || m_config.pwrBandTxMemory()) {
-		m_pwrBandTuneMemory[curBand] = ui->outAttenuation->value(); // remember our Tune pwr
+		/* CE3TSK: the same guard the other power-memory writes carry - a slider still at the .ui
+		   default of 1 (the rig never came up, so band_changed () never restored it) must not be
+		   memorised as this band's tune drive. */
+		if (m_outAttenuationRestored) m_pwrBandTuneMemory[curBand] = ui->outAttenuation->value(); // remember our Tune pwr
 		m_PwrBandSetOK = false;
-		ui->outAttenuation->setValue(m_pwrBandTxMemory[curBand].toInt()); // set to Tx pwr
+		/* CE3TSK: come back to the remembered Tx drive, or failing that to whatever the slider
+		   held before the tune. Reading an absent key would give 0, i.e. minimum drive, and
+		   leaving the slider alone would transmit at tune drive. */
+		if (m_pwrBandTxMemory.contains(curBand)) ui->outAttenuation->setValue(m_pwrBandTxMemory[curBand].toInt()); // set to Tx pwr
+		else if (m_outAttenuationPreTune >= 0) ui->outAttenuation->setValue(m_outAttenuationPreTune);
 		m_PwrBandSetOK = true;
     }
+	m_outAttenuationPreTune = -1;
   }
   if (m_tune) {
 	if (!tuneButtonTimer.isActive())
@@ -8823,7 +9483,7 @@ void MainWindow::on_stopTxButton_clicked()                    //Stop Tx
 
 void MainWindow::rigOpen ()
 {
-  ui->readFreq->setStyleSheet(ui->readFreq->styleSheet().left(230)+QString("background: %1;\n color: %2;\n}").arg(Radio::convert_dark("#ffa500",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
+  setRigLamp ("#ffa500");
   m_rigOk=false;
   ui->readFreq->setText ("");
   ui->readFreq->setEnabled (true);
@@ -9024,7 +9684,7 @@ void MainWindow::handle_transceiver_update (Transceiver::TransceiverState const&
       if (m_tx_when_ready && g_iptt) {
 //          QThread::currentThread()->setPriority(QThread::HighestPriority);
           int ms_delay=1000*m_config.txDelay();
-          if(m_mode=="FT4") ms_delay=20;
+          if(m_mode=="FT4" || m_mode=="FT2") ms_delay=20;   // CE3TSK step 6: FT2 starts 150 ms into the period, so the sequencer cannot take the default second
           ptt1Timer.start(ms_delay);
 //          printf("ptt1Timer started\n");
           if(m_config.write_decoded_debug()) writeToALLTXT("ptt1Timer started");
@@ -9048,12 +9708,14 @@ void MainWindow::handle_transceiver_update (Transceiver::TransceiverState const&
   m_rigState = s;
   auto old_freqNominal = m_freqNominal;
   m_freqNominal = s.frequency ();
+  highlightBandButton ();   // CE3TSK
   // initializing
   if (old_state.online () == false && s.online () == true) {
       on_monitorButton_clicked(true);
       if(m_config.write_decoded_debug()) writeToALLTXT("handle_transceiver_update: transceiver state transition from offline to online");
       if(m_mode=="FT8") on_actionFT8_triggered();
       else if(m_mode=="FT4") on_actionFT4_triggered();
+      else if(m_mode=="FT2") on_actionFT2_triggered();   // CE3TSK
       else if(m_mode=="JT9+JT65") on_actionJT9_JT65_triggered();
       else if(m_mode=="JT9") on_actionJT9_triggered();
       else if(m_mode=="JT65") on_actionJT65_triggered();
@@ -9106,7 +9768,7 @@ void MainWindow::handle_transceiver_update (Transceiver::TransceiverState const&
   }
 
   displayDialFrequency ();
-  ui->readFreq->setStyleSheet(ui->readFreq->styleSheet().left(230)+QString("background: %1;\n color: %2;\n}").arg(Radio::convert_dark("#00ff00",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
+  setRigLamp ("#00ff00");
   m_rigOk=true;
   ui->readFreq->setEnabled (false);
   ui->readFreq->setText (s.split () ? "S" : "");
@@ -9120,7 +9782,7 @@ void MainWindow::handle_transceiver_update (Transceiver::TransceiverState const&
 
 void MainWindow::handle_transceiver_failure (QString const& reason)
 {
-  ui->readFreq->setStyleSheet(ui->readFreq->styleSheet().left(230)+QString("background: %1;\n color: %2;\n}").arg(Radio::convert_dark("#ff0000",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
+  setRigLamp ("#ff0000");
   m_rigOk=false;
   ui->readFreq->setEnabled (true);
   haltTx("Rig control error: " + reason + " ");
@@ -9173,6 +9835,12 @@ void MainWindow::transmit (double snr)
     else Q_EMIT sendMessage (NUM_FT4_SYMBOLS,576.0,ui->TxFreqSpinBox->value()-m_XIT,toneSpacing,m_soundOutput,
                         m_config.audio_output_channel(),true,snr,m_TRperiod);
   }
+  else if (m_modeTx == "FT2") {   // CE3TSK step 6: FT4's 105 symbols, 288 samples each
+    toneSpacing=-2.0;                     //Transmit a pre-computed, filtered waveform.
+    if (m_tci) Q_EMIT m_config.transceiver_modulator_start(NUM_FT4_SYMBOLS,288.0,ui->TxFreqSpinBox->value()-m_XIT,toneSpacing,true,snr,m_TRperiod);
+    else Q_EMIT sendMessage (NUM_FT4_SYMBOLS,288.0,ui->TxFreqSpinBox->value()-m_XIT,toneSpacing,m_soundOutput,
+                        m_config.audio_output_channel(),true,snr,m_TRperiod);
+  }
   else if (m_modeTx == "JT65") {
     toneSpacing=11025.0/4096.0;
     if (m_tci) Q_EMIT m_config.transceiver_modulator_start(NUM_JT65_SYMBOLS,4096.0*12000.0/11025.0,ui->TxFreqSpinBox->value()-m_XIT,toneSpacing,true,snr,m_TRperiod);
@@ -9201,7 +9869,12 @@ void MainWindow::transmit (double snr)
 
 void MainWindow::on_outAttenuation_valueChanged (int a)
 {
-  m_outAttenuationRestored = true;   // CE3TSK: the slider now holds a real value, save it as is
+  /* CE3TSK: only a change the operator made says the slider holds a real value. m_PwrBandSetOK is
+     false around our own setValue calls (the band and tune memories), and setting the flag there
+     defeated the guard it exists for: a tune started before band_changed () had restored the drive
+     set the flag from its own setValue and then memorised the .ui default. band_changed () sets
+     the flag itself once it restores. */
+  if (m_PwrBandSetOK) m_outAttenuationRestored = true;
   QString tt_str; int areversed=450-a;
   qreal dBAttn {areversed / 10.};       // slider interpreted as dB / 100
   QString curBand;
@@ -9978,7 +10651,7 @@ void MainWindow::txwatchdog (bool triggered)
     {
       m_bTxTime=false;
       if (m_enableTx) enableTx_mode (false);
-      tx_status_label->setStyleSheet (QString("QLabel{background: %1}").arg(Radio::convert_dark("#ff8080",m_useDarkStyle)));
+      setTxStatusColour ("#ff8080");
       tx_status_label->setText (tr("Tx watchdog expired"));
     }
   else

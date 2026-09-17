@@ -443,6 +443,71 @@ Formāts:
         <source>Are you sure you want to discard your current contest frequencies and replace them with the FT8 and FT4 entries from the working frequencies?</source>
         <translation>Vai tiešām vēlaties atmest pašreizējās sacensību frekvences un aizstāt tās ar FT8 un FT4 ierakstiem no darba frekvencēm?</translation>
     </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The downloaded file is not a cty.dat file.</source>
+        <translation>Lejupielādētais fails nav cty.dat fails.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The downloaded file is not a LoTW user activity file.</source>
+        <translation>Lejupielādētais fails nav LoTW lietotāju aktivitātes fails.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>SSL/TLS support is not installed, so %1 cannot be fetched.</source>
+        <translation>SSL/TLS atbalsts nav instalēts, tāpēc %1 nevar iegūt.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The server answered with HTTP status %1.</source>
+        <translation>Serveris atbildēja ar HTTP statusu %1.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The download was stopped at %1 MB.</source>
+        <translation>Lejupielāde tika apturēta pie %1 MB.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The file could not be saved: %1</source>
+        <translation>Failu neizdevās saglabāt: %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>Network error: %1</source>
+        <translation>Tīkla kļūda: %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>Download of %1 failed</source>
+        <translation>%1 lejupielāde neizdevās</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The copy in use has not been changed.</source>
+        <translation>Izmantotā kopija nav mainīta.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>downloading...</source>
+        <translation>notiek lejupielāde...</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>version unknown</source>
+        <translation>versija nav zināma</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>%1, bundled with this release</source>
+        <translation>%1, pievienota šai versijai</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>%1, downloaded</source>
+        <translation>%1, lejupielādēta</translation>
+    </message>
 </context>
 <context>
     <name>CountryDat</name>
@@ -1093,7 +1158,7 @@ Formāts:
     </message>
     <message>
         <location filename="../logbook/countrydat.cpp" line="164"/>
-        <source>St. Pierre &amp; Miquelo</source>
+        <source>St. Pierre &amp; Miquelon</source>
         <translation>Senpjēra un Mikelona</translation>
     </message>
     <message>
@@ -2919,12 +2984,6 @@ Formāts:
         <translation>Sākums</translation>
     </message>
     <message>
-        <location filename="../logqso.ui" line="82"/>
-        <location filename="../logqso.ui" line="114"/>
-        <source>dd/MM/yyyy HH:mm:ss</source>
-        <translation>dd.MM.yyyy HH:mm:ss</translation>
-    </message>
-    <message>
         <location filename="../logqso.ui" line="98"/>
         <source>End</source>
         <translation>Beigas</translation>
@@ -3019,18 +3078,6 @@ Formāts:
         <location filename="../mainwindow.ui" line="282"/>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Lost audio blocks. FT8 15sec interval has 52 blocks of audio data, where decoder being triggered if audio data reached 51 blocks in &apos;SWL/late strat of decoder&apos; modes or 50 blocks otherwise. Under Windows OS there were multiple reports audio data being lost, for Windows OS there is workaround implemented to start FT8 decoder if there at least 46 out of 52 audio blocks received. Lost audio blocks notification lets user know there is something wrong in the setup.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Zaudētie audio bloki. FT8 15 sekunžu intervālā ir 52 audio datu bloki; dekodētājs tiek palaists, kad saņemti 51 bloks režīmos 'SWL/vēlā dekodētāja palaišana' vai 50 bloki pārējos gadījumos. Windows vidē vairākkārt ziņots par audio datu zudumu, tāpēc tur FT8 dekodētājs tiek palaists jau tad, ja saņemti vismaz 46 no 52 blokiem. Paziņojums par zaudētajiem blokiem norāda, ka iestatījumos kaut kas nav kārtībā.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>
-    </message>
-    <message>
-        <location filename="../mainwindow.ui" line="288"/>
-        <location filename="../mainwindow.cpp" line="1885"/>
-        <location filename="../mainwindow.cpp" line="3738"/>
-        <location filename="../mainwindow.cpp" line="3751"/>
-        <location filename="../mainwindow.cpp" line="6284"/>
-        <location filename="../mainwindow.cpp" line="6289"/>
-        <location filename="../mainwindow.cpp" line="6335"/>
-        <location filename="../mainwindow.cpp" line="6346"/>
-        <source>Band Activity</source>
-        <translation>Joslas aktivitāte</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="397"/>
@@ -5370,8 +5417,8 @@ UDP serveris %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
-        <source>FT8/FT4 threads</source>
-        <translation>FT8/FT4 pavedieni</translation>
+        <source>FT* threads</source>
+        <translation>FT* pavedieni</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
@@ -5410,8 +5457,8 @@ UDP serveris %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
-        <source>FT8/FT4 decode bandwidth</source>
-        <translation>FT8/FT4 dekodēšanas joslas platums</translation>
+        <source>FT* decode bandwidth</source>
+        <translation>FT* dekodēšanas joslas platums</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
@@ -5750,6 +5797,31 @@ UDP serveris %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
+        <source>FT2 decoding</source>
+        <translation>FT2 kodēšana</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>default: deep, nothing added  (1457 of 1575 signals on the 240-period set, 0.10 s at reply time)</source>
+        <translation>noklusējums: dziļš, nekas nav pievienots  (1457 signāli no 1575 240 periodu kopā, 0,10 s atbildes laikā)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>background 3 with deep OSD, the alternate pass and the residual unit, all in the TX window, nothing at reply time  (+0.5 % on the 240-period set, +7.4 % on the crowded band, 0.10 s; ~1.8 s of idle CPU a period)</source>
+        <translation>fons 3 ar dziļo OSD, alternatīvo kārtu un atlikuma vienību, viss raidīšanas logā, nekas atbildes laikā  (+0,5 % 240 periodu kopā, +7,4 % pārpildītā joslā, 0,10 s; ~1,8 s brīva procesora laika periodā)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>max effort: as many members as fit the 0.5 s RX budget + low thresholds at reply time, six in the TX window with its extras and low thresholds  (+0.7 % in total, +12.5 % on the crowded band, 0.56 s mean, 1.2 s worst period)</source>
+        <translation>maksimālā piepūle: tik dalībnieku, cik ietilpst 0,5 s RX budžetā + zemi sliekšņi atbildes laikā, seši raidīšanas logā ar tā papildinājumiem un zemiem sliekšņiem  (+0,7 % kopā, +12,5 % pārpildītā joslā, 0,56 s vidēji, 1,2 s sliktākais periods)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>budget auto: as many members as fit the reply deadline, from this band's measured cost (0.5 s; the rest run in the TX background)</source>
+        <translation>budžets auto: tik dalībnieku, cik ietilpst atbildes termiņā, pēc šīs joslas izmērītajām izmaksām (0,5 s; pārējie darbojas raidīšanas fonā)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
         <source>fast: the shallow decoder, nothing added</source>
         <translation>ātrs: virspusējais dekoders, nekas nav pievienots</translation>
     </message>
@@ -6023,13 +6095,18 @@ Tas tiek jautāts tikai vienu reizi.</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
+        <source>Custom - the FT2 RX / TX background controls match no preset</source>
+        <translation>Custom - FT2 RX / TX fona vadīklas neatbilst nevienam priekšiestatījumam</translation>
+    </message>
+    <message>
+        <location filename="../../mainwindow.cpp"/>
         <source>Custom - the FT4 RX / TX background controls match no preset</source>
         <translation>Custom - FT4 RX / TX fona vadīklas neatbilst nevienam priekšiestatījumam</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
-        <source>FT8 / FT4 decoding preset - greyed while the mode is neither</source>
-        <translation>FT8 / FT4 dekodēšanas priekšiestatījums - pelēks, kamēr režīms nav neviens no tiem</translation>
+        <source>FT* decoding preset - greyed while the mode is none of them</source>
+        <translation>FT* dekodēšanas priekšiestatījums - pelēks, kamēr režīms nav neviens no tiem</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
@@ -6040,6 +6117,16 @@ Tas tiek jautāts tikai vienu reizi.</translation>
         <location filename="../../mainwindow.cpp"/>
         <source>ensemble - the RX-only recipe of the former Ensemble preset (no menu entry)</source>
         <translation>ansamblis - bijušā priekšiestatījuma Ensemble tikai RX recepte (bez izvēlnes ieraksta)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>Use dar&amp;k style</source>
+        <translation>Lietot &amp;tumšo stilu</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>Band buttons</source>
+        <translation>Joslu pogas</translation>
     </message>
 </context>
 <context>
@@ -9624,6 +9711,46 @@ izmaiņas</translation>
         <location filename="../Configuration.ui"/>
         <source>Replace the table with the published default frequencies of the selected contest.</source>
         <translation>Aizstāt tabulu ar izvēlēto sacensību publicētajām noklusējuma frekvencēm.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Translate DXCC na&amp;mes</source>
+        <translation>Tulkot DXCC nosaukum&amp;us</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Show DXCC names in the language of the user interface. When off, the English names are shown.</source>
+        <translation>Rādīt DXCC nosaukumus lietotāja saskarnes valodā. Kad izslēgts, tiek rādīti angļu nosaukumi.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Data files</source>
+        <translation>Datu faili</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>The newer of the downloaded copy and the copy bundled with this release is used.</source>
+        <translation>Tiek izmantota jaunākā kopija: lejupielādētā vai šai versijai pievienotā.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download the latest cty.dat from country-files.com. The DXCC entities, CQ and ITU zones and continents shown for each call come from it.</source>
+        <translation>Lejupielādēt jaunāko cty.dat no country-files.com. No tā nāk katram izsaukuma signālam rādītās DXCC vienības, CQ un ITU zonas un kontinenti.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download latest</source>
+        <translation>Lejupielādēt jaunāko</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>LoTW users:</source>
+        <translation>LoTW lietotāji:</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download the latest LoTW user activity file from ARRL. Stations that uploaded to LoTW during the last 365 days are treated as LoTW users.</source>
+        <translation>Lejupielādēt jaunāko LoTW lietotāju aktivitātes failu no ARRL. Stacijas, kas pēdējo 365 dienu laikā augšupielādējušas datus LoTW, tiek uzskatītas par LoTW lietotājiem.</translation>
     </message>
 </context>
 <context>

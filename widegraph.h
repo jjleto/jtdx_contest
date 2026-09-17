@@ -69,6 +69,7 @@ public slots:
   void setDialFreq(double d);
 
 protected:
+  bool eventFilter (QObject * object, QEvent * event) override;   // CE3TSK: keeps Controls above the scale line
   virtual void keyPressEvent( QKeyEvent *e );
   void closeEvent (QCloseEvent *);
 

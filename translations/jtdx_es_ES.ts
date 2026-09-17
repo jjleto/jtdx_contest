@@ -444,6 +444,71 @@ Formato:
         <source>Are you sure you want to discard your current contest frequencies and replace them with the FT8 and FT4 entries from the working frequencies?</source>
         <translation>¿Está seguro de que desea descartar sus frecuencias de concurso actuales y reemplazarlas por las entradas FT8 y FT4 de las frecuencias de trabajo?</translation>
     </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The downloaded file is not a cty.dat file.</source>
+        <translation>El archivo descargado no es un archivo cty.dat.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The downloaded file is not a LoTW user activity file.</source>
+        <translation>El archivo descargado no es un archivo de actividad de usuarios de LoTW.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>SSL/TLS support is not installed, so %1 cannot be fetched.</source>
+        <translation>No está instalado el soporte SSL/TLS, por lo que no se puede obtener %1.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The server answered with HTTP status %1.</source>
+        <translation>El servidor respondió con el estado HTTP %1.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The download was stopped at %1 MB.</source>
+        <translation>La descarga se detuvo al llegar a %1 MB.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The file could not be saved: %1</source>
+        <translation>No se pudo guardar el archivo: %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>Network error: %1</source>
+        <translation>Error de red: %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>Download of %1 failed</source>
+        <translation>Falló la descarga de %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The copy in use has not been changed.</source>
+        <translation>La copia en uso no se modificó.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>downloading...</source>
+        <translation>descargando...</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>version unknown</source>
+        <translation>versión desconocida</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>%1, bundled with this release</source>
+        <translation>%1, incluida en esta versión</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>%1, downloaded</source>
+        <translation>%1, descargada</translation>
+    </message>
 </context>
 <context>
     <name>CountryDat</name>
@@ -1095,7 +1160,7 @@ Formato:
     </message>
     <message>
         <location filename="../logbook/countrydat.cpp" line="164"/>
-        <source>St. Pierre &amp; Miquelo</source>
+        <source>St. Pierre &amp; Miquelon</source>
         <translation>San Pedro y Miquelón</translation>
     </message>
     <message>
@@ -2922,12 +2987,6 @@ Formato:
         <translation>Inicio</translation>
     </message>
     <message>
-        <location filename="../logqso.ui" line="82"/>
-        <location filename="../logqso.ui" line="114"/>
-        <source>dd/MM/yyyy HH:mm:ss</source>
-        <translation>dd/MM/yyyy HH:mm:ss</translation>
-    </message>
-    <message>
         <location filename="../logqso.ui" line="98"/>
         <source>End</source>
         <translation>Fin</translation>
@@ -3022,18 +3081,6 @@ Formato:
         <location filename="../mainwindow.ui" line="282"/>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Lost audio blocks. FT8 15sec interval has 52 blocks of audio data, where decoder being triggered if audio data reached 51 blocks in &apos;SWL/late strat of decoder&apos; modes or 50 blocks otherwise. Under Windows OS there were multiple reports audio data being lost, for Windows OS there is workaround implemented to start FT8 decoder if there at least 46 out of 52 audio blocks received. Lost audio blocks notification lets user know there is something wrong in the setup.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Bloques de audio perdidos. El intervalo de 15 segundos del FT8 tiene 52 bloques de datos de audio, donde el decodificador se activa si los datos de audio alcanzan los 51 bloques en los modos &apos;SWL/inicio tardío de decodificador&apos; o 50 bloques en caso contrario. Bajo el sistema operativo Windows hubo múltiples reportes de pérdida de datos de audio, para el sistema operativo Windows se ha implementado una solución para iniciar el decodificador FT8 si se reciben al menos 46 de los 52 bloques de audio. La notificación de pérdida de bloques de audio le permite al usuario saber que hay algo mal en la configuración.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>
-    </message>
-    <message>
-        <location filename="../mainwindow.ui" line="288"/>
-        <location filename="../mainwindow.cpp" line="1885"/>
-        <location filename="../mainwindow.cpp" line="3738"/>
-        <location filename="../mainwindow.cpp" line="3751"/>
-        <location filename="../mainwindow.cpp" line="6284"/>
-        <location filename="../mainwindow.cpp" line="6289"/>
-        <location filename="../mainwindow.cpp" line="6335"/>
-        <location filename="../mainwindow.cpp" line="6346"/>
-        <source>Band Activity</source>
-        <translation>Activ.banda</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="397"/>
@@ -5379,8 +5426,8 @@ Servidor UDP %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
-        <source>FT8/FT4 threads</source>
-        <translation>Hilos FT8/FT4</translation>
+        <source>FT* threads</source>
+        <translation>Hilos FT*</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
@@ -5419,8 +5466,8 @@ Servidor UDP %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
-        <source>FT8/FT4 decode bandwidth</source>
-        <translation>Ancho de banda de decodificación FT8/FT4</translation>
+        <source>FT* decode bandwidth</source>
+        <translation>Ancho de banda de decodificación FT*</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
@@ -5759,6 +5806,31 @@ Servidor UDP %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
+        <source>FT2 decoding</source>
+        <translation>Decodificación FT2</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>default: deep, nothing added  (1457 of 1575 signals on the 240-period set, 0.10 s at reply time)</source>
+        <translation>por defecto: profundo, sin añadidos  (1457 de 1575 señales en el conjunto de 240 periodos, 0.10 s en el tiempo de respuesta)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>background 3 with deep OSD, the alternate pass and the residual unit, all in the TX window, nothing at reply time  (+0.5 % on the 240-period set, +7.4 % on the crowded band, 0.10 s; ~1.8 s of idle CPU a period)</source>
+        <translation>segundo plano 3 con OSD profundo, la pasada alternativa y la unidad residual, todo en la ventana TX, nada en el tiempo de respuesta  (+0.5 % en el conjunto de 240 periodos, +7.4 % en una banda congestionada, 0.10 s; ~1.8 s de CPU libre por periodo)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>max effort: as many members as fit the 0.5 s RX budget + low thresholds at reply time, six in the TX window with its extras and low thresholds  (+0.7 % in total, +12.5 % on the crowded band, 0.56 s mean, 1.2 s worst period)</source>
+        <translation>máximo esfuerzo: tantos miembros como quepan en el presupuesto RX de 0.5 s + umbrales bajos en el tiempo de respuesta, seis en la ventana TX con sus extras y umbrales bajos  (+0.7 % en total, +12.5 % en una banda congestionada, 0.56 s de media, 1.2 s en el peor periodo)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>budget auto: as many members as fit the reply deadline, from this band's measured cost (0.5 s; the rest run in the TX background)</source>
+        <translation>presupuesto automático: tantos miembros como quepan en el plazo de respuesta, según el coste medido de esta banda (0.5 s; el resto se ejecuta en el segundo plano TX)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
         <source>fast: the shallow decoder, nothing added</source>
         <translation>rápido: el decodificador superficial, sin añadidos</translation>
     </message>
@@ -6032,13 +6104,18 @@ Esto se pregunta una sola vez.</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
+        <source>Custom - the FT2 RX / TX background controls match no preset</source>
+        <translation>Custom - los controles de RX / fondo TX de FT2 no coinciden con ningún preajuste</translation>
+    </message>
+    <message>
+        <location filename="../../mainwindow.cpp"/>
         <source>Custom - the FT4 RX / TX background controls match no preset</source>
         <translation>Custom - los controles de RX / fondo TX de FT4 no coinciden con ningún preajuste</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
-        <source>FT8 / FT4 decoding preset - greyed while the mode is neither</source>
-        <translation>Preajuste de decodificación FT8 / FT4 - en gris mientras el modo no sea ninguno de los dos</translation>
+        <source>FT* decoding preset - greyed while the mode is none of them</source>
+        <translation>Preajuste de decodificación FT* - en gris mientras el modo no sea ninguno de ellos</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
@@ -6049,6 +6126,16 @@ Esto se pregunta una sola vez.</translation>
         <location filename="../../mainwindow.cpp"/>
         <source>ensemble - the RX-only recipe of the former Ensemble preset (no menu entry)</source>
         <translation>conjunto - la receta solo de RX del antiguo preajuste Ensemble (sin entrada de menú)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>Use dar&amp;k style</source>
+        <translation>Usar el estilo oscuro</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>Band buttons</source>
+        <translation>Botones de banda</translation>
     </message>
 </context>
 <context>
@@ -9639,6 +9726,46 @@ cambios en la tarjeta de sonido</translation>
         <location filename="../Configuration.ui"/>
         <source>Replace the table with the published default frequencies of the selected contest.</source>
         <translation>Reemplazar la tabla con las frecuencias por defecto publicadas del concurso seleccionado.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Translate DXCC na&amp;mes</source>
+        <translation>Traducir no&amp;mbres DXCC</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Show DXCC names in the language of the user interface. When off, the English names are shown.</source>
+        <translation>Muestra los nombres DXCC en el idioma de la interfaz. Si está desactivado, se muestran los nombres en inglés.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Data files</source>
+        <translation>Archivos de datos</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>The newer of the downloaded copy and the copy bundled with this release is used.</source>
+        <translation>Se usa la copia más reciente entre la descargada y la incluida en esta versión.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download the latest cty.dat from country-files.com. The DXCC entities, CQ and ITU zones and continents shown for each call come from it.</source>
+        <translation>Descarga el cty.dat más reciente de country-files.com. De él provienen las entidades DXCC, las zonas CQ e ITU y los continentes que se muestran para cada indicativo.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download latest</source>
+        <translation>Descargar la última</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>LoTW users:</source>
+        <translation>Usuarios de LoTW:</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download the latest LoTW user activity file from ARRL. Stations that uploaded to LoTW during the last 365 days are treated as LoTW users.</source>
+        <translation>Descarga el archivo de actividad de usuarios de LoTW más reciente de la ARRL. Las estaciones que subieron a LoTW en los últimos 365 días se consideran usuarios de LoTW.</translation>
     </message>
 </context>
 <context>

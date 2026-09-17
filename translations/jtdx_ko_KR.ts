@@ -443,6 +443,71 @@ Format:
         <source>Are you sure you want to discard your current contest frequencies and replace them with the FT8 and FT4 entries from the working frequencies?</source>
         <translation>현재 콘테스트 주파수를 버리고 운용 주파수의 FT8·FT4 항목으로 바꾸시겠습니까?</translation>
     </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The downloaded file is not a cty.dat file.</source>
+        <translation>다운로드한 파일은 cty.dat 파일이 아닙니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The downloaded file is not a LoTW user activity file.</source>
+        <translation>다운로드한 파일은 LoTW 사용자 활동 파일이 아닙니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>SSL/TLS support is not installed, so %1 cannot be fetched.</source>
+        <translation>SSL/TLS 지원이 설치되어 있지 않아 %1을(를) 가져올 수 없습니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The server answered with HTTP status %1.</source>
+        <translation>서버가 HTTP 상태 %1(으)로 응답했습니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The download was stopped at %1 MB.</source>
+        <translation>다운로드가 %1 MB에서 중단되었습니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The file could not be saved: %1</source>
+        <translation>파일을 저장할 수 없습니다: %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>Network error: %1</source>
+        <translation>네트워크 오류: %1</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>Download of %1 failed</source>
+        <translation>%1 다운로드 실패</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>The copy in use has not been changed.</source>
+        <translation>사용 중인 사본은 변경되지 않았습니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>downloading...</source>
+        <translation>다운로드 중...</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>version unknown</source>
+        <translation>버전 알 수 없음</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>%1, bundled with this release</source>
+        <translation>%1, 이 릴리스에 포함됨</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.cpp"/>
+        <source>%1, downloaded</source>
+        <translation>%1, 다운로드됨</translation>
+    </message>
 </context>
 <context>
     <name>CountryDat</name>
@@ -1093,7 +1158,7 @@ Format:
     </message>
     <message>
         <location filename="../logbook/countrydat.cpp" line="164"/>
-        <source>St. Pierre &amp; Miquelo</source>
+        <source>St. Pierre &amp; Miquelon</source>
         <translation>생피에르 미클롱</translation>
     </message>
     <message>
@@ -2920,12 +2985,6 @@ Format:
         <translation>시작</translation>
     </message>
     <message>
-        <location filename="../logqso.ui" line="82"/>
-        <location filename="../logqso.ui" line="114"/>
-        <source>dd/MM/yyyy HH:mm:ss</source>
-        <translation>yyyy-MM-dd HH:mm:ss</translation>
-    </message>
-    <message>
         <location filename="../logqso.ui" line="98"/>
         <source>End</source>
         <translation>종료</translation>
@@ -3020,18 +3079,6 @@ Format:
         <location filename="../mainwindow.ui" line="282"/>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Lost audio blocks. FT8 15sec interval has 52 blocks of audio data, where decoder being triggered if audio data reached 51 blocks in &apos;SWL/late strat of decoder&apos; modes or 50 blocks otherwise. Under Windows OS there were multiple reports audio data being lost, for Windows OS there is workaround implemented to start FT8 decoder if there at least 46 out of 52 audio blocks received. Lost audio blocks notification lets user know there is something wrong in the setup.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;손실된 오디오 블록입니다. 15초 FT8 구간은 52개의 오디오 블록으로 이루어지며, 'SWL/디코더 늦은 시작' 모드에서는 51개, 그 밖에는 50개가 모이면 디코더가 시작됩니다. Windows에서는 오디오 손실 보고가 여러 차례 있어, 52개 중 46개만 받아도 FT8 디코더를 시작하는 우회책이 들어 있습니다. 이 알림은 설정에 문제가 있음을 알려 줍니다.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>
-    </message>
-    <message>
-        <location filename="../mainwindow.ui" line="288"/>
-        <location filename="../mainwindow.cpp" line="1885"/>
-        <location filename="../mainwindow.cpp" line="3738"/>
-        <location filename="../mainwindow.cpp" line="3751"/>
-        <location filename="../mainwindow.cpp" line="6284"/>
-        <location filename="../mainwindow.cpp" line="6289"/>
-        <location filename="../mainwindow.cpp" line="6335"/>
-        <location filename="../mainwindow.cpp" line="6346"/>
-        <source>Band Activity</source>
-        <translation>밴드 활동</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="397"/>
@@ -5371,8 +5418,8 @@ UDP 서버 %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
-        <source>FT8/FT4 threads</source>
-        <translation>FT8/FT4 스레드</translation>
+        <source>FT* threads</source>
+        <translation>FT* 스레드</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
@@ -5411,8 +5458,8 @@ UDP 서버 %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
-        <source>FT8/FT4 decode bandwidth</source>
-        <translation>FT8/FT4 디코드 대역폭</translation>
+        <source>FT* decode bandwidth</source>
+        <translation>FT* 디코드 대역폭</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
@@ -5751,6 +5798,31 @@ UDP 서버 %2:%3</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui"/>
+        <source>FT2 decoding</source>
+        <translation>FT2 디코딩</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>default: deep, nothing added  (1457 of 1575 signals on the 240-period set, 0.10 s at reply time)</source>
+        <translation>기본: 깊게, 추가 없음  (240주기 세트에서 1575개 중 1457개, 응답 시점 0.10초)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>background 3 with deep OSD, the alternate pass and the residual unit, all in the TX window, nothing at reply time  (+0.5 % on the 240-period set, +7.4 % on the crowded band, 0.10 s; ~1.8 s of idle CPU a period)</source>
+        <translation>배경 3 + 깊은 OSD + 대체 패스 + 잔차 단위를 모두 TX 구간에서, 응답 시점에는 없음  (240주기 세트 +0.5 %, 혼잡한 밴드 +7.4 %, 0.10초. 주기당 유휴 CPU 약 1.8초)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>max effort: as many members as fit the 0.5 s RX budget + low thresholds at reply time, six in the TX window with its extras and low thresholds  (+0.7 % in total, +12.5 % on the crowded band, 0.56 s mean, 1.2 s worst period)</source>
+        <translation>최대 노력: 0.5초 RX 예산에 맞는 만큼의 멤버와 낮은 임계값을 응답 시점에, TX 구간에서는 6개를 추가 항목과 낮은 임계값과 함께  (합계 +0.7 %, 혼잡한 밴드 +12.5 %, 평균 0.56초, 최악 주기 1.2초)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>budget auto: as many members as fit the reply deadline, from this band's measured cost (0.5 s; the rest run in the TX background)</source>
+        <translation>예산 자동: 이 밴드에서 측정한 비용을 기준으로 응답 기한에 맞는 만큼의 멤버 (0.5초. 나머지는 TX 배경에서 실행)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
         <source>fast: the shallow decoder, nothing added</source>
         <translation>빠름: 얕은 디코더만, 추가 없음</translation>
     </message>
@@ -6024,13 +6096,18 @@ This is asked only once.</source>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
+        <source>Custom - the FT2 RX / TX background controls match no preset</source>
+        <translation>Custom - FT2의 RX / TX 백그라운드 설정이 어떤 프리셋과도 맞지 않습니다</translation>
+    </message>
+    <message>
+        <location filename="../../mainwindow.cpp"/>
         <source>Custom - the FT4 RX / TX background controls match no preset</source>
         <translation>Custom - FT4의 RX / TX 백그라운드 설정이 어떤 프리셋과도 맞지 않습니다</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
-        <source>FT8 / FT4 decoding preset - greyed while the mode is neither</source>
-        <translation>FT8 / FT4 디코딩 프리셋 - 모드가 둘 다 아닌 동안은 회색입니다</translation>
+        <source>FT* decoding preset - greyed while the mode is none of them</source>
+        <translation>FT* 디코딩 프리셋 - 모드가 그중 어느 것도 아닌 동안은 회색입니다</translation>
     </message>
     <message>
         <location filename="../../mainwindow.cpp"/>
@@ -6041,6 +6118,16 @@ This is asked only once.</source>
         <location filename="../../mainwindow.cpp"/>
         <source>ensemble - the RX-only recipe of the former Ensemble preset (no menu entry)</source>
         <translation>앙상블 - 이전 Ensemble 프리셋의 RX 전용 레시피(메뉴 항목 없음)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>Use dar&amp;k style</source>
+        <translation>다크 스타일 사용(&amp;K)</translation>
+    </message>
+    <message>
+        <location filename="../mainwindow.ui"/>
+        <source>Band buttons</source>
+        <translation>밴드 버튼</translation>
     </message>
 </context>
 <context>
@@ -9619,6 +9706,46 @@ soundcard changes</source>
         <location filename="../Configuration.ui"/>
         <source>Replace the table with the published default frequencies of the selected contest.</source>
         <translation>선택한 콘테스트의 공식 기본 주파수로 표를 바꿉니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Translate DXCC na&amp;mes</source>
+        <translation>DXCC 이름 번역(&amp;M)</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Show DXCC names in the language of the user interface. When off, the English names are shown.</source>
+        <translation>DXCC 이름을 사용자 인터페이스 언어로 표시합니다. 끄면 영어 이름이 표시됩니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Data files</source>
+        <translation>데이터 파일</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>The newer of the downloaded copy and the copy bundled with this release is used.</source>
+        <translation>다운로드한 사본과 이 릴리스에 포함된 사본 중 더 새로운 것을 사용합니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download the latest cty.dat from country-files.com. The DXCC entities, CQ and ITU zones and continents shown for each call come from it.</source>
+        <translation>country-files.com에서 최신 cty.dat를 다운로드합니다. 각 호출부호에 표시되는 DXCC 엔티티, CQ 및 ITU 존, 대륙 정보가 이 파일에서 옵니다.</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download latest</source>
+        <translation>최신 버전 다운로드</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>LoTW users:</source>
+        <translation>LoTW 사용자:</translation>
+    </message>
+    <message>
+        <location filename="../Configuration.ui"/>
+        <source>Download the latest LoTW user activity file from ARRL. Stations that uploaded to LoTW during the last 365 days are treated as LoTW users.</source>
+        <translation>ARRL에서 최신 LoTW 사용자 활동 파일을 다운로드합니다. 최근 365일 이내에 LoTW에 업로드한 국은 LoTW 사용자로 간주됩니다.</translation>
     </message>
 </context>
 <context>

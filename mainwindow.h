@@ -6,6 +6,7 @@
 #include <QtWidgets>
 #include "contestignore.h"   // CE3TSK: the contest's five minute skip list
 #include "decodepreset.h"
+#include "ft2preset.h"   // CE3TSK step 5: FT2's own tiers, in FT4's fields
 #include "decodebudget.h"   // CE3TSK P7   // CE3TSK
 #else
 #include <QtGui>
@@ -111,6 +112,7 @@ protected:
   void childEvent(QChildEvent *) override;
   virtual bool eventFilter(QObject *object, QEvent *event);
   virtual void resizeEvent(QResizeEvent *event);
+  virtual void showEvent(QShowEvent *event);   // CE3TSK: where the splitter's share is first read
   virtual void mousePressEvent(QMouseEvent *event);
 
 private slots:
@@ -144,6 +146,8 @@ private slots:
   void on_pbSpotDXCall_clicked ();  
   void on_actionJTDX_Web_Site_triggered();
   void on_actionWide_Waterfall_triggered();
+  void on_actionUse_dark_style_triggered (bool checked);   // CE3TSK
+  void on_actionBand_buttons_toggled (bool checked);   // CE3TSK
   void on_actionOpen_triggered();
   void on_actionConvert_bit_depth_triggered();   /* CE3TSK */
   void on_actionOpen_next_in_directory_triggered();
@@ -276,12 +280,28 @@ private slots:
   void on_actionFT4BgEnsemble4_triggered();
   void on_actionFT4BgEnsemble5_triggered();
   void on_actionFT4BgEnsemble6_triggered();
+  void on_actionFT2PresetFast_triggered();        // CE3TSK step 5: FT2's tiers
+  void on_actionFT2PresetDefault_triggered();
+  void on_actionFT2PresetRecommended_triggered();
+  void on_actionFT2PresetMaxEffort_triggered();
+  void on_actionFT2BgEnabled_toggled(bool checked);
+  void on_actionFT2EnsembleOff_triggered();
+  void on_actionFT2EnsembleAuto_triggered();
+  void on_actionFT2EnsembleBudget_triggered();
+  void on_actionFT2BgEnsembleOff_triggered();
+  void on_actionFT2BgEnsemble3_triggered();
+  void on_actionFT2BgEnsemble6_triggered();
+  void on_actionFT2BgEnsembleAuto_triggered();
   void on_actionFT4PresetFast_triggered();        // CE3TSK: FT4 presets, as FT8 has them (item 67: FT8's tiers)
   void on_actionFT4PresetDefault_triggered();
   void on_actionFT4PresetBestPower_triggered();
   void on_actionFT4PresetRecommended_triggered();
   void on_actionFT4PresetMaxDecodes_triggered();
   void on_actionFT4PresetMaxEffort_triggered();
+  void applyFT2Preset (FT2Preset p);   // CE3TSK step 5: FT2's four tiers
+  void markFT2Presets();
+  void refreshFT2Preset();
+  void setFT2EnsembleActions();
   void applyFT4Preset (FT4Preset p);
   void refreshFT4Preset();
   FT4Recipe currentFT4Recipe () const;   // CE3TSK: the FT4 controls as one recipe (built at two sites before)
@@ -378,6 +398,7 @@ private slots:
   void on_actionJT9_triggered();
   void on_actionT10_triggered();
   void on_actionFT4_triggered();
+  void on_actionFT2_triggered();   // CE3TSK
   void on_actionFT8_triggered();
   void on_actionJT65_triggered();
   void on_actionJT9_JT65_triggered();
@@ -486,6 +507,7 @@ private slots:
   void haltTx(QString reason);
   void haltTxTuneTimer();
   void logChanged();
+  void dataFilesUpdated ();   // CE3TSK
   bool stdCall(QString const& w);
   void ScrollBarPosition(int n);
   void on_S_meter_button_clicked(bool checked);
@@ -558,6 +580,7 @@ private:
      never came up saved the .ui default of 1 over it, and poisoned the per-band memories
      with 1 as well.  Seen after an in-place language restart. */
   bool m_outAttenuationRestored = false;
+  int m_outAttenuationPreTune = -1;   // CE3TSK: the drive to come back to when a tune ends, -1 = none captured
   QThread m_audioThread;
   QClipboard *clipboard = QGuiApplication::clipboard();
 
@@ -670,6 +693,13 @@ private:
   int m_ft8RXBudget;           // CE3TSK P8: the RX budget for ensemble effort "budget auto", tenths of a second
   int m_ft4RXBudget;           // CE3TSK item 80: FT4's (13 = 1.3 s against the 1.36 s reply deadline)
   int m_ft4BgMargin;           // CE3TSK item 80: FT4's background margin, tenths (the max effort preset sets 5)
+  /* CE3TSK step 5 of the FT2 port: FT2's own settings. FT2 is decoded by the FT4 chain and writes
+     FT4's parameter fields, but its period is half as long and its reply deadline about 580 ms, so
+     the VALUES have to be its own - they are kept as one FT4Recipe rather than sixteen members,
+     which is also what the preset table and the lamp compare against. */
+  FT4Recipe m_ft2Recipe;
+  int m_ft2RXBudget;           // tenths; FT2's deadline is 0.58 s, so its default is 5, not FT4's 13
+  int m_ft2BgMargin;           // tenths, as FT4's
   int m_nDecodesRx;            // decodes of the period's own decode, before the background
   QString m_decodeLabelPrefix; // "UTC dB DT Freq Avg= Lag=" as set at <DecodeFinished>; the lag and the count follow
   QString m_decodeLag;         // the lag figure, coloured separately; empty while the decode runs
@@ -757,8 +787,11 @@ private:
   bool m_bHisCallStd;
   bool m_callNotif;
   bool m_gridNotif;
+  bool m_countryNameTranslated;   // CE3TSK
   bool m_qsoLogged;
   bool m_logInitNeeded;
+  bool m_dataFilesChanged;   // CE3TSK: the pending log init also rereads cty.dat and the LoTW list
+  bool m_dxCallHidden;       // CE3TSK: DX Call is green after a right-click hid the call
   bool m_wantedchkd;
   bool m_menus;
   bool m_wasSkipTx1;
@@ -771,6 +804,18 @@ private:
   bool m_rigOk;
   bool m_bandChanged;
   bool m_useDarkStyle;
+  QString m_rigLampColour;       // CE3TSK: the last colours set through setRigLamp () and friends
+  QString m_bandLabelColour;
+  QString m_dxCallEntryColour;
+  QString m_txStatusColour;
+  QList<QPushButton *> m_bandButtons;              // CE3TSK: View > Band buttons
+  QPointer<QAbstractItemModel> m_bandButtonsModel; // the list they were built from
+  QList<QMetaObject::Connection> m_bandButtonsConnections;
+  QTimer m_bandButtonsTimer;                       // one rebuild per burst of list changes
+  QTimer m_dialWheelTimer;                         // CE3TSK: dial wheel tuning, one QSY per burst of notches
+  QElapsedTimer m_dialWheelClock;                  // since the last notch or wheel QSY, see dialWheelHolding ()
+  Radio::Frequency m_dialWheelTarget {0};          // where the wheel has taken the dial
+  int m_dialWheelDelta {0};                        // wheel angle short of a whole notch (touchpads)
   bool m_lostaudio;
   bool m_lasthint;
   bool m_monitoroff;
@@ -899,7 +944,7 @@ private:
   struct ContestUiParked
   {
     bool autoTx = true;
-    bool skipTx1 = false;
+    bool skipTx1 = true;    /* CE3TSK: matches the ContestUiSkipTx1 default */
     bool rrr = false;
     bool maxDistance = false;    /* CE3TSK: AutoSeq -> "Max distance instead of best SNR", forced off in a contest (the points tiers already rank by distance; the tie-break should be SNR) */
     bool rprtPriority = false;   /* its mutually exclusive partner - forcing the one clears the other, so both are parked */
@@ -941,10 +986,20 @@ private:
   QHash<QString, QVariant> m_pwrBandTxMemory; // Remembers power level by band
   QHash<QString, QVariant> m_pwrBandTuneMemory; // Remembers power level by band for tuning
   QByteArray m_geometry;
+  QSize m_geometryMinHint;   // CE3TSK: minimumSizeHint () when m_geometry was saved, see restoreMainGeometry ()
+  /* CE3TSK: the share of the splitter the LEFT pane holds, kept across window resizes. Qt divides
+     new width by its own rules - measured 41.3 % of 1000 px becoming 47.8 % at 1600 - so widening
+     the window slid the bar rightwards and the operator had to drag it back. */
+  double m_splitRatio {0.0};
+  bool m_splitApplying {false};   // setSizes must not be read back as an operator's drag
+  void keepSplitRatio ();
+  void rememberSplitRatio ();
+  bool m_splitLearned {false};   // the share is learnt once the window is laid out, then only a drag changes it
   qint32 m_ft8Freq[15] = {1810,1840,1908,3573,5357,7074,10136,14074,18100,21074,24915,28074,40680,50313,70154};
 
   //---------------------------------------------------- private functions
   void readSettings();
+  void restoreMainGeometry ();   // CE3TSK
   void setDecodedTextFont (QFont const&);
   void setStopHSym();
   void setClockStyle(bool reset);
@@ -995,6 +1050,27 @@ private:
   void stub();
   void statusChanged();
   void styleChanged();
+  void darkStyleChanged ();   // CE3TSK
+  // CE3TSK: colours that follow a state, painted again by styleChanged ()
+  void setRigLamp (QString const& colour);
+  void setBandLabelColour (QString const& colour);
+  void setModeLabelStyle (QString const& mode);
+  void setDxCallEntryColour (QString const& background);
+  void setEnableTxButtonStyle ();
+  void setHoundButtonStyle ();
+  void setSpotButtonStyle ();
+  void initLogIfNeeded ();
+  void setTxStatusColour (QString const& colour);
+  void setProgressBarStyle ();
+  // CE3TSK: View > Band buttons
+  void scheduleBandButtons ();
+  void rebuildBandButtons ();
+  void highlightBandButton ();
+  void selectBandButton (Radio::Frequency frequency);
+  bool dialFrequencyWheel (QWheelEvent * event);   // CE3TSK
+  void lookupDxCallOnQrz ();                       // CE3TSK
+  void applyDialWheel ();
+  bool dialWheelHolding () const;
   void offerRecommendedColors ();   // CE3TSK: the one-time colour offer, see Configuration
   bool gridOK(QString g);
   bool gridRR73(QString g);
