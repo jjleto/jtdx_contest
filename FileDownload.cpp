@@ -88,7 +88,7 @@ void FileDownload::start_download ()
       return;
     }
   QNetworkRequest request {url};
-  request.setAttribute (QNetworkRequest::FollowRedirectsAttribute, true);
+  request.setAttribute (QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
   request.setMaximumRedirectsAllowed (10);
 #if QT_VERSION >= QT_VERSION_CHECK (5, 15, 0)
   // Qt 5 has no transfer timeout by default: a server that stalls mid-transfer would never send

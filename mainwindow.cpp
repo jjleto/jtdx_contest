@@ -3265,7 +3265,7 @@ bool MainWindow::dialFrequencyWheel (QWheelEvent * event)
   int digit {-1};
   for (int i = 0; i < 3; ++i)
     {
-      int const at {text.size () - 7 + i};
+      int const at {static_cast<int> (text.size () - 7 + i)};
       int const from {left + metrics.horizontalAdvance (text.left (at))};
       if (text.at (at).isDigit () && x >= from && x < from + metrics.horizontalAdvance (text.at (at))) digit = i;
     }

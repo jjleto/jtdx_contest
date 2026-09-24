@@ -4322,7 +4322,7 @@ void Configuration::impl::start_data_file_download (FileDownload& download, char
                                                     QDate (* version_of) (QByteArray const&), QString const& not_that_file)
 {
   // the directory LogBook::init reads its copies from
-  QDir const data_dir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)};
+  QDir const data_dir {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)};
   download.configure (network_manager_, url, data_dir.absoluteFilePath (file_name),
                       "JTDX_contest/" + QCoreApplication::applicationVersion (),
                       [version_of, not_that_file] (QByteArray const& content) {
@@ -4350,7 +4350,7 @@ void Configuration::impl::data_file_download_failed (char const * file_name, Fil
 
 void Configuration::impl::update_data_file_labels ()
 {
-  QDir const data_dir {QStandardPaths::writableLocation (QStandardPaths::DataLocation)};
+  QDir const data_dir {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)};
   auto const show = [this, &data_dir] (QLabel * label, QPushButton * button, FileDownload const& download,
                                        char const * file_name, QDate (* version_of) (QByteArray const&)) {
       button->setEnabled (!download.running ());

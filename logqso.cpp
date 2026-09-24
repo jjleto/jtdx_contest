@@ -24,6 +24,8 @@ LogQSO::LogQSO(QSettings * settings, Configuration const * config, JTDXDateTime 
   , m_jtdxtime {jtdxtime}
 {
   ui->setupUi(this);
+  ui->start_date_time->setTimeSpec (Qt::UTC);
+  ui->end_date_time->setTimeSpec (Qt::UTC);
   ui->buttonBox->button(QDialogButtonBox::Ok)->setText(tr("&OK"));
   ui->buttonBox->button(QDialogButtonBox::Cancel)->setText(tr("&Cancel"));
 //  setWindowTitle("JTDX " + versnumber.simplified () + " - Log QSO");
